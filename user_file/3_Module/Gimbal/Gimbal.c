@@ -1,6 +1,8 @@
 ﻿#include "Gimbal.h"
 #include "gimbal_sentry_target.h"
+#include "gimbal_sentry_control.h"
 #include "alg_pid.h"
+#include "yaw_fusion_cfg.h"
 #include <stdbool.h>
 #include <stdint.h>
 #define PI   3.1415926f
@@ -28,40 +30,30 @@
 // 电机输出限幅（GM6020电压模式常用范围）
 #define GIMBAL_MOTOR_CMD_LIMIT      10000.0f
 
-// 哨兵扫描正弦波参数：默认绕 0 度中心摆动，只需改幅值和频率
+// ============ 哨兵扫描参数：绕 0 度中心摆动 ============
 #define GIMBAL_SCAN_YAW_AMPLITUDE_DEG        50.0f
 #define GIMBAL_SCAN_PITCH_AMPLITUDE_DEG      37.0f
-#define GIMBAL_SCAN_YAW_FREQ_HZ              0.2f
-#define GIMBAL_SCAN_PITCH_FREQ_HZ            0.2f
-#define GIMBAL_LOST_RETURN_SPEED_DEG_S       110.0f
-#define GIMBAL_LOST_RETURN_NEAR_DEG          1.0f
+#define GIMBAL_SCAN_YAW_FREQ_HZ              0.8f
+#define GIMBAL_SCAN_PITCH_FREQ_HZ            0.3f
+
+// ============ 视觉跟踪参数 ============
 #define GIMBAL_VISION_TRACK_TIMEOUT_MS       120u
 #define GIMBAL_VISION_TARGET_FILTER_TAU_S    0.010f
-#define GIMBAL_TRACK_SHAPER_MEDIUM_ENTER_DEG 2.0f
-#define GIMBAL_TRACK_SHAPER_MEDIUM_EXIT_DEG  3.0f
-#define GIMBAL_TRACK_SHAPER_FINE_ENTER_DEG   0.8f
-#define GIMBAL_TRACK_SHAPER_FINE_EXIT_DEG    1.2f
-#define GIMBAL_SCAN_SHAPER_FILTER_TAU_S      0.003f
-#define GIMBAL_PITCH_SCAN_SHAPER_SLEW_RATE   30.0f
-#define GIMBAL_YAW_SCAN_SHAPER_SLEW_RATE     30.0f
-#define GIMBAL_PITCH_TRACK_FAST_FILTER_TAU_S 0.0010f
-#define GIMBAL_PITCH_TRACK_MID_FILTER_TAU_S  0.0020f
-#define GIMBAL_PITCH_TRACK_FINE_FILTER_TAU_S 0.0035f
-#define GIMBAL_YAW_TRACK_FAST_FILTER_TAU_S   0.0010f
-#define GIMBAL_YAW_TRACK_MID_FILTER_TAU_S    0.0020f
-#define GIMBAL_YAW_TRACK_FINE_FILTER_TAU_S   0.0035f
-#define GIMBAL_PITCH_TRACK_FAST_SLEW_RATE    180.0f
-#define GIMBAL_PITCH_TRACK_MID_SLEW_RATE     80.0f
-#define GIMBAL_PITCH_TRACK_FINE_SLEW_RATE    30.0f
-#define GIMBAL_YAW_TRACK_FAST_SLEW_RATE      200.0f
-#define GIMBAL_YAW_TRACK_MID_SLEW_RATE       90.0f
-#define GIMBAL_YAW_TRACK_FINE_SLEW_RATE      35.0f
+
+// ============ 丢失目标回扫处理 ============
+#define GIMBAL_LOST_RETURN_SPEED_DEG_S       110.0f
+#define GIMBAL_LOST_RETURN_NEAR_DEG          1.0f
+
+// ============ 哨兵模式固定整形参数（低通+固定斜率） ============
+#define GIMBAL_SENTRY_SHAPER_FILTER_TAU_S      0.003f
+#define GIMBAL_PITCH_SENTRY_SHAPER_SLEW_RATE   60.0f
+#define GIMBAL_YAW_SENTRY_SHAPER_SLEW_RATE     80.0f
 
 // Yaw外环参数（角度环 -> 速度目标）
-#define GIMBAL_YAW_ANGLE_KP                  0.2f
-#define GIMBAL_YAW_ANGLE_KI                  0.1f
+#define GIMBAL_YAW_ANGLE_KP                  1.0f
+#define GIMBAL_YAW_ANGLE_KI                  0.0f
 #define GIMBAL_YAW_ANGLE_KD                  0.00f
-#define GIMBAL_YAW_ANGLE_FEEDFORWARD         0.025
+#define GIMBAL_YAW_ANGLE_FEEDFORWARD         0.025f
 #define GIMBAL_YAW_ANGLE_OUT_LIMIT           10.0f
 #define GIMBAL_YAW_ANGLE_I_LIMIT             1.5f
 #define GIMBAL_YAW_ANGLE_DEADBAND_DEG        0.0f
@@ -83,10 +75,10 @@
 #define GIMBAL_TEST_FREQ_HZ         1.25f
 
 //Pitch外环参数（角度环 -> 速度目标）
-#define GIMBAL_PITCH_ANGLE_KP                  0.6f
-#define GIMBAL_PITCH_ANGLE_KI                  0.1f
+#define GIMBAL_PITCH_ANGLE_KP                  1.0f
+#define GIMBAL_PITCH_ANGLE_KI                  0.0f
 #define GIMBAL_PITCH_ANGLE_KD                  0.00f
-#define GIMBAL_PITCH_ANGLE_FEEDFORWARD         0.02
+#define GIMBAL_PITCH_ANGLE_FEEDFORWARD         0.025f
 #define GIMBAL_PITCH_ANGLE_OUT_LIMIT           10.0f
 #define GIMBAL_PITCH_ANGLE_I_LIMIT             1.5f
 #define GIMBAL_PITCH_ANGLE_DEADBAND_DEG        0.4f
@@ -95,8 +87,8 @@
 
 
 // Pitch内环参数（速度环 -> 电机控制量）
-#define GIMBAL_PITCH_SPEED_KP                  1300.0f
-#define GIMBAL_PITCH_SPEED_KI                  600.0f
+#define GIMBAL_PITCH_SPEED_KP                  1000.0f
+#define GIMBAL_PITCH_SPEED_KI                  300.0f
 #define GIMBAL_PITCH_SPEED_KD                  0.00f
 #define GIMBAL_PITCH_SPEED_I_LIMIT             2000.0f
 //这个是调试使用的
@@ -108,7 +100,9 @@ Motor_TypeDef Gimbal_Motor_Pitch;
 Motor_TypeDef Gimbal_Motor_Yaw;
 imu_data_t Gimbal_IMU_Data;
 euler_t Gimbal_Euler_Angle_to_send;
+euler_t Gimbal_Euler_Angle_Final_Observe;
 Manifold_UART_Tx_Data Tx_Data;
+Gimbal_Yaw_Fusion_Observe_TypeDef Gimbal_Yaw_Fusion_Observe;
 
 #if GIMBAL_IMU_DRDY_ENABLE
 static TaskHandle_t g_gimbal_imu_task_handle = NULL;
@@ -116,6 +110,9 @@ static TaskHandle_t g_gimbal_imu_task_handle = NULL;
 static alg_dwt_timebase_t g_gimbal_imu_timebase;
 volatile float g_gimbal_imu_last_dt_s = GIMBAL_IMU_DT_DEFAULT_S;
 volatile uint8_t g_gimbal_imu_last_dt_from_dwt = 0;
+static YawFusion_t g_gimbal_yaw_fusion;
+static YawFusionConfig_t g_gimbal_yaw_fusion_cfg = YAW_FUSION_CFG_DEFAULT_INITIALIZER;
+static uint8_t g_gimbal_yaw_fusion_need_align = 0u;
 
 
 
@@ -143,37 +140,20 @@ static const Gimbal_Sentry_Target_Config_TypeDef g_gimbal_sentry_target_config =
         .lost_return_near_deg = GIMBAL_LOST_RETURN_NEAR_DEG
     }
 };
-/**
- * @brief 跟踪态角度环输出整形配置。
- * @note  大误差区保留更快的响应，小误差锁定区自动收紧斜率限制和低通时间常数。
- */
-static const PID_Output_Schedule_Config_TypeDef g_gimbal_pitch_track_shaper_config =
-{
-    .medium_enter_error = GIMBAL_TRACK_SHAPER_MEDIUM_ENTER_DEG,
-    .medium_exit_error = GIMBAL_TRACK_SHAPER_MEDIUM_EXIT_DEG,
-    .fine_enter_error = GIMBAL_TRACK_SHAPER_FINE_ENTER_DEG,
-    .fine_exit_error = GIMBAL_TRACK_SHAPER_FINE_EXIT_DEG,
-    .fast_filter_tau_s = GIMBAL_PITCH_TRACK_FAST_FILTER_TAU_S,
-    .medium_filter_tau_s = GIMBAL_PITCH_TRACK_MID_FILTER_TAU_S,
-    .fine_filter_tau_s = GIMBAL_PITCH_TRACK_FINE_FILTER_TAU_S,
-    .fast_slew_rate = GIMBAL_PITCH_TRACK_FAST_SLEW_RATE,
-    .medium_slew_rate = GIMBAL_PITCH_TRACK_MID_SLEW_RATE,
-    .fine_slew_rate = GIMBAL_PITCH_TRACK_FINE_SLEW_RATE
-};
-static const PID_Output_Schedule_Config_TypeDef g_gimbal_yaw_track_shaper_config =
-{
-    .medium_enter_error = GIMBAL_TRACK_SHAPER_MEDIUM_ENTER_DEG,
-    .medium_exit_error = GIMBAL_TRACK_SHAPER_MEDIUM_EXIT_DEG,
-    .fine_enter_error = GIMBAL_TRACK_SHAPER_FINE_ENTER_DEG,
-    .fine_exit_error = GIMBAL_TRACK_SHAPER_FINE_EXIT_DEG,
-    .fast_filter_tau_s = GIMBAL_YAW_TRACK_FAST_FILTER_TAU_S,
-    .medium_filter_tau_s = GIMBAL_YAW_TRACK_MID_FILTER_TAU_S,
-    .fine_filter_tau_s = GIMBAL_YAW_TRACK_FINE_FILTER_TAU_S,
-    .fast_slew_rate = GIMBAL_YAW_TRACK_FAST_SLEW_RATE,
-    .medium_slew_rate = GIMBAL_YAW_TRACK_MID_SLEW_RATE,
-    .fine_slew_rate = GIMBAL_YAW_TRACK_FINE_SLEW_RATE
-};
 
+static const Gimbal_Sentry_Control_Config_TypeDef g_gimbal_sentry_control_config =
+{
+    .pitch_angle_feedforward = GIMBAL_PITCH_ANGLE_FEEDFORWARD,
+    .yaw_angle_feedforward = GIMBAL_YAW_ANGLE_FEEDFORWARD,
+    .sentry_shaper_filter_tau_s = GIMBAL_SENTRY_SHAPER_FILTER_TAU_S,
+    .pitch_sentry_shaper_slew_rate = GIMBAL_PITCH_SENTRY_SHAPER_SLEW_RATE,
+    .yaw_sentry_shaper_slew_rate = GIMBAL_YAW_SENTRY_SHAPER_SLEW_RATE,
+    .vision_shaper_filter_tau_s = GIMBAL_VISION_SHAPER_FILTER_TAU_S,
+    .pitch_vision_shaper_slew_rate = GIMBAL_PITCH_VISION_SHAPER_SLEW_RATE,
+    .yaw_vision_shaper_slew_rate = GIMBAL_YAW_VISION_SHAPER_SLEW_RATE,
+    .target_reset_pitch_deg = GIMBAL_TARGET_RESET_PITCH_DEG,
+    .target_reset_yaw_deg = GIMBAL_TARGET_RESET_YAW_DEG
+};
 /**
  * @brief   云台角度限幅函数
  * @param  value: 输入角度值（单位：度）
@@ -197,56 +177,6 @@ static float Gimbal_Clamp(float value, float min_value, float max_value)
 }
 
 /**
- * @brief 根据当前哨兵状态为角度环选择输出整形参数。
- * @param pid 角度环 PID 指针
- * @param angle_error_deg 当前角度误差（单位：度）
- * @param track_config 跟踪态分段整形配置
- * @param default_filter_tau_s 非跟踪态默认低通时间常数
- * @param default_slew_rate 非跟踪态默认斜率限制
- * @retval 无
- * @note  自适应整形只在 TRACK_ARMOR 状态启用，避免影响扫描与回扫阶段的既有手感。
- */
-static void Gimbal_Update_Angle_Output_Shaping(PID_TypeDef *pid,
-                                               float angle_error_deg,
-                                               const PID_Output_Schedule_Config_TypeDef *track_config,
-                                               float default_filter_tau_s,
-                                               float default_slew_rate)
-{
-    if (pid == NULL)
-    {
-        return;
-    }
-
-    if (Gimbal_Sentry_Target_Get_State() == GIMBAL_SENTRY_STATE_TRACK_ARMOR)
-    {
-        PID_Output_Schedule_Apply(pid, angle_error_deg, track_config);
-        return;
-    }
-
-    PID_Output_Schedule_Reset(pid, PID_OUTPUT_SCHEDULE_MODE_FAST);
-    PID_Output_Filter_Enable(pid, default_filter_tau_s > 0.0f, default_filter_tau_s);
-    PID_Output_Slew_Enable(pid, default_slew_rate > 0.0f, default_slew_rate);
-}
-
-static float Gimbal_Yaw_Speed_Test_Sine_Target(void)
-{
-    static float test_time_s = 0.0f;
-    const float angular_frequency = 2.0f * PI * GIMBAL_TEST_FREQ_HZ;
-    const float sine_period_s = 1.0f / GIMBAL_TEST_FREQ_HZ;
-    float target_speed;
-
-    target_speed = GIMBAL_TEST_TARGET * sinf(angular_frequency * test_time_s);
-    test_time_s += GIMBAL_CTRL_DT;
-
-    if (test_time_s >= sine_period_s)
-    {
-        test_time_s -= sine_period_s;
-    }
-
-    return target_speed;
-}
-
-/**
  * @brief   复位当前控制目标
  * @retval 无
  */
@@ -265,6 +195,12 @@ void Gimbal_Reset_Imu_Output(void)
     Gimbal_Euler_Angle_to_send.roll = 0.0f;
     Gimbal_Euler_Angle_to_send.pitch = 0.0f;
     Gimbal_Euler_Angle_to_send.yaw = 0.0f;
+    Gimbal_Euler_Angle_Final_Observe.roll = 0.0f;
+    Gimbal_Euler_Angle_Final_Observe.pitch = 0.0f;
+    Gimbal_Euler_Angle_Final_Observe.yaw = 0.0f;
+    YawFusion_Reset(&g_gimbal_yaw_fusion);
+    memset(&Gimbal_Yaw_Fusion_Observe, 0, sizeof(Gimbal_Yaw_Fusion_Observe));
+    g_gimbal_yaw_fusion_need_align = 1u;
 }
 
 /**
@@ -281,6 +217,9 @@ static void Gimbal_Device_Check_Handle_CAN_Change(uint8_t online)
     Motor_Clear_Runtime(&Gimbal_Motor_Pitch);
     Motor_Clear_Runtime(&Gimbal_Motor_Yaw);
     Gimbal_Reset_Control_Targets();
+    YawFusion_Reset(&g_gimbal_yaw_fusion);
+    memset(&Gimbal_Yaw_Fusion_Observe, 0, sizeof(Gimbal_Yaw_Fusion_Observe));
+    g_gimbal_yaw_fusion_need_align = 1u;
 }
 
 /**
@@ -429,16 +368,21 @@ void Gimbal_Init(void* pramas)
                          -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT,
                          -GIMBAL_YAW_SPEED_I_LIMIT, GIMBAL_YAW_SPEED_I_LIMIT);
     //速度环的阻力补偿
-    PID_Friction_Compensation_Enable(&Gimbal_Motor_Yaw.PID[0], true ,1200.0f,0.0f, 0.3, true );
-    PID_Friction_Compensation_Enable(&Gimbal_Motor_Pitch.PID[0], true, 1000.0f, 0.0f, 0.3f, true);
-    //一阶低通
-    PID_Output_Filter_Enable(&Gimbal_Motor_Pitch.PID[1], true, GIMBAL_SCAN_SHAPER_FILTER_TAU_S);
-    PID_Output_Slew_Enable(&Gimbal_Motor_Pitch.PID[1], true, GIMBAL_PITCH_SCAN_SHAPER_SLEW_RATE);
-    
-    PID_Output_Filter_Enable(&Gimbal_Motor_Yaw.PID[1], true, GIMBAL_SCAN_SHAPER_FILTER_TAU_S);
-    PID_Output_Slew_Enable(&Gimbal_Motor_Yaw.PID[1], true, GIMBAL_YAW_SCAN_SHAPER_SLEW_RATE);
-    PID_Deadband_Enable(&Gimbal_Motor_Yaw.PID[1],true,0.08);
+    PID_Friction_Compensation_Enable(&Gimbal_Motor_Yaw.PID[0], true ,1200.0f,0.0f, 0.3, false );
+    PID_Friction_Compensation_Enable(&Gimbal_Motor_Pitch.PID[0], true, 1600.0f, 0.0f, 0.3f, false);
+    Gimbal_Sentry_Control_Init(&g_gimbal_sentry_control_config);
+    Gimbal_Sentry_Control_Apply_Mode_Params(&Gimbal_Motor_Pitch,
+                                            &Gimbal_Motor_Yaw,
+                                            GIMBAL_SENTRY_STATE_SCAN);
+    // 死区测试
+    // PID_Deadband_Enable(&Gimbal_Motor_Yaw.PID[1], true, 0.2);
+    // PID_Deadband_Enable(&Gimbal_Motor_Pitch.PID[1], true, 0.4);
+   
     Gimbal_Sentry_Target_Init(&g_gimbal_sentry_target_config);
+    memset(&Gimbal_Euler_Angle_Final_Observe, 0, sizeof(Gimbal_Euler_Angle_Final_Observe));
+    YawFusion_Init(&g_gimbal_yaw_fusion, &g_gimbal_yaw_fusion_cfg);
+    memset(&Gimbal_Yaw_Fusion_Observe, 0, sizeof(Gimbal_Yaw_Fusion_Observe));
+    g_gimbal_yaw_fusion_need_align = 1u;
 }
 
 
@@ -461,6 +405,7 @@ void Gimbal_Motor_Control_ALL_Test(void* params)
     float yaw_output;
     float yaw_target_deg;
     float yaw_target_speed;
+    Gimbal_Sentry_State_TypeDef sentry_state;
     static int16_t (* const can_output_map[2])(float) =
     {
         Gimbal_Output_To_CAN_Zero,
@@ -495,26 +440,35 @@ void Gimbal_Motor_Control_ALL_Test(void* params)
             continue;
         }
         now_tick = xTaskGetTickCount();
+        // 2) 更新目标和控制参数，不获取当前目标角度
         Gimbal_Sentry_Target_Update(now_tick);
+
+        // 2.1) 根据当前Sentry状态应用控制参数
         pitch_target_deg = Gimbal_Sentry_Target_Get_Pitch();
         yaw_target_deg = Gimbal_Sentry_Target_Get_Yaw();
-        //2) 计算控制输出
-        //pitch_target_deg = Gimbal_Yaw_Speed_Test_Sine_Target();
-
-
-        Gimbal_Update_Angle_Output_Shaping(&Gimbal_Motor_Pitch.PID[1],
-                                           pitch_target_deg - (-Gimbal_Euler_Angle_to_send.pitch),
-                                           &g_gimbal_pitch_track_shaper_config,
-                                           GIMBAL_SCAN_SHAPER_FILTER_TAU_S,
-                                           GIMBAL_PITCH_SCAN_SHAPER_SLEW_RATE);
+        // 2.2) 检查是否需要重置角度PID动态状态
+        sentry_state = Gimbal_Sentry_Target_Get_State();
+        // 应用当前状态对应的控制参数（如整形器斜率、前馈增益等）
+        Gimbal_Sentry_Control_Apply_Mode_Params(&Gimbal_Motor_Pitch,
+                                                &Gimbal_Motor_Yaw,
+                                                sentry_state);
+        // 2.3) 检查是否需要重置角度PID动态状态
+        if (Gimbal_Sentry_Control_Angle_PID_Reset_Event_Check(sentry_state,
+                                                              pitch_target_deg,
+                                                              yaw_target_deg) != 0u)
+        {
+            Gimbal_Sentry_Control_Reset_Angle_PID_Dynamic_State(&Gimbal_Motor_Pitch.PID[1],
+                                                                pitch_target_deg,
+                                                                0.0f);
+            Gimbal_Sentry_Control_Reset_Angle_PID_Dynamic_State(&Gimbal_Motor_Yaw.PID[1],
+                                                                yaw_target_deg,
+                                                                0.0f);
+     
+        }
+        // 3) 计算PID输出
         pitch_target_speed = Motor_PID_Calculate_Angle(&Gimbal_Motor_Pitch, pitch_target_deg, -Gimbal_Euler_Angle_to_send.pitch, GIMBAL_CTRL_DT);
         pitch_output = Motor_PID_Calculate_Speed(&Gimbal_Motor_Pitch, pitch_target_speed, Gimbal_Motor_Pitch.RxData.Speed, GIMBAL_CTRL_DT);
         
-        Gimbal_Update_Angle_Output_Shaping(&Gimbal_Motor_Yaw.PID[1],
-                                           yaw_target_deg - Gimbal_Euler_Angle_to_send.yaw,
-                                           &g_gimbal_yaw_track_shaper_config,
-                                           GIMBAL_SCAN_SHAPER_FILTER_TAU_S,
-                                           GIMBAL_YAW_SCAN_SHAPER_SLEW_RATE);
         yaw_target_speed = Motor_PID_Calculate_Angle(&Gimbal_Motor_Yaw, yaw_target_deg, Gimbal_Euler_Angle_to_send.yaw, GIMBAL_CTRL_DT);
         yaw_output = Motor_PID_Calculate_Speed(&Gimbal_Motor_Yaw, yaw_target_speed, Gimbal_Motor_Yaw.RxData.Speed, GIMBAL_CTRL_DT);
         
@@ -523,10 +477,10 @@ void Gimbal_Motor_Control_ALL_Test(void* params)
         yaw_output = Gimbal_Clamp(yaw_output, -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT);
 
         can_online = CAN_Alive_IsOnline(&hcan2);
-        // Gimbal_Send_Pitch_Yaw_CAN(can_output_map[can_online](pitch_output),
-        //                         can_output_map[can_online](yaw_output));
-        //Motor_Send_CAN_Data(&Gimbal_Motor_Pitch, (int16_t)pitch_output);
-          Motor_Send_CAN_Data(&Gimbal_Motor_Yaw, (int16_t)yaw_output);
+        Gimbal_Send_Pitch_Yaw_CAN(can_output_map[can_online](pitch_output),
+                                can_output_map[can_online](yaw_output));
+        // Motor_Send_CAN_Data(&Gimbal_Motor_Pitch, (int16_t)pitch_output);
+        // Motor_Send_CAN_Data(&Gimbal_Motor_Yaw, (int16_t)yaw_output);
         vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
     }
 }
@@ -562,7 +516,11 @@ void Gimbal_IMU_EXTI_Callback(uint16_t GPIO_Pin)
 void Gimbal_Euler(void *pramas)
 {
     float imu_dt;
+    float acc_norm_g;
+    float imu_gyro_z_rad_s;
     euler_t euler_raw;
+    uint16_t encoder_raw_count;
+    uint8_t encoder_feedback_valid;
 
     (void)pramas;
 
@@ -600,6 +558,52 @@ void Gimbal_Euler(void *pramas)
         Gimbal_IMU_Data.dt = imu_dt;
         euler_raw = BMI088_Complementary_Filter(&Gimbal_IMU_Data, imu_dt, GIMBAL_MAHONY_KP, GIMBAL_MAHONY_KI);
         Gimbal_Euler_Angle_to_send = euler_raw;
+
+        /* 并行 yaw 融合比对链路：边界统一换成 rad/rad/s/s，不影响现有 IMU 欧拉角输出。 */
+        encoder_raw_count = Gimbal_Motor_Yaw.RxData.Last_encoder_angle;
+        encoder_feedback_valid = Gimbal_Motor_Yaw.RxData.Encoder_Initialized;
+        imu_gyro_z_rad_s = Gimbal_IMU_Data.gyro.z * PI / 180.0f;
+        acc_norm_g = sqrtf(Gimbal_IMU_Data.acc.x * Gimbal_IMU_Data.acc.x +
+                           Gimbal_IMU_Data.acc.y * Gimbal_IMU_Data.acc.y +
+                           Gimbal_IMU_Data.acc.z * Gimbal_IMU_Data.acc.z);
+
+        if (encoder_feedback_valid != 0u)
+        {
+            YawFusion_UpdateEncoderRaw(&g_gimbal_yaw_fusion, encoder_raw_count);
+        }
+
+        YawFusion_UpdateImu(&g_gimbal_yaw_fusion, imu_gyro_z_rad_s, acc_norm_g, imu_dt);
+        YawFusion_UpdateTemperature(&g_gimbal_yaw_fusion, Gimbal_IMU_Data.temp);
+
+        /* 编码器首次 ready 或掉线恢复后，先与编码器连续角对齐，避免对比输出起步跳变。 */
+        if ((encoder_feedback_valid != 0u) && (g_gimbal_yaw_fusion_need_align != 0u))
+        {
+            YawFusion_AlignToEncoder(&g_gimbal_yaw_fusion);
+            g_gimbal_yaw_fusion_need_align = 0u;
+        }
+
+        YawFusion_Run(&g_gimbal_yaw_fusion);
+        YawFusion_GetState(&g_gimbal_yaw_fusion, &Gimbal_Yaw_Fusion_Observe.fusion_state);
+        Gimbal_Yaw_Fusion_Observe.encoder_raw_count = encoder_raw_count;
+        Gimbal_Yaw_Fusion_Observe.encoder_feedback_valid = encoder_feedback_valid;
+        Gimbal_Yaw_Fusion_Observe.imu_gyro_z_rad_s = imu_gyro_z_rad_s;
+        Gimbal_Yaw_Fusion_Observe.acc_norm_g = acc_norm_g;
+        Gimbal_Yaw_Fusion_Observe.temp_c = Gimbal_IMU_Data.temp;
+        Gimbal_Yaw_Fusion_Observe.dt_s = imu_dt;
+        Gimbal_Yaw_Fusion_Observe.update_count++;
+
+        /* 统一输出一份便于观察的最终欧拉角：roll/pitch 取 IMU，yaw 取并行融合结果。 */
+        Gimbal_Euler_Angle_Final_Observe.roll = euler_raw.roll;
+        Gimbal_Euler_Angle_Final_Observe.pitch = euler_raw.pitch;
+        if (g_gimbal_yaw_fusion_need_align == 0u)
+        {
+            Gimbal_Euler_Angle_Final_Observe.yaw =
+                Gimbal_Yaw_Fusion_Observe.fusion_state.yaw_est_rad * 180.0f / PI;
+        }
+        else
+        {
+            Gimbal_Euler_Angle_Final_Observe.yaw = euler_raw.yaw;
+        }
     }
 }
 

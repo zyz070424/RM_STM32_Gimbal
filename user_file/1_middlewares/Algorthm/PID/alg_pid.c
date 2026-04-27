@@ -21,56 +21,6 @@ static float PID_Get_Friction_Compensation(const PID_TypeDef *pid)
     return pid->friction_fc * tanhf(omega / w_eps) + pid->friction_bv * omega;
 }
 
-static PID_Output_Schedule_Mode_TypeDef PID_Select_Output_Schedule_Mode(
-    PID_Output_Schedule_Mode_TypeDef current_mode,
-    bool schedule_inited,
-    float abs_error,
-    const PID_Output_Schedule_Config_TypeDef *config)
-{
-    if (schedule_inited == false)
-    {
-        if (abs_error <= config->fine_enter_error)
-        {
-            return PID_OUTPUT_SCHEDULE_MODE_FINE;
-        }
-        if (abs_error <= config->medium_enter_error)
-        {
-            return PID_OUTPUT_SCHEDULE_MODE_MEDIUM;
-        }
-        return PID_OUTPUT_SCHEDULE_MODE_FAST;
-    }
-
-    switch (current_mode)
-    {
-        case PID_OUTPUT_SCHEDULE_MODE_FAST:
-            if (abs_error < config->medium_enter_error)
-            {
-                return PID_OUTPUT_SCHEDULE_MODE_MEDIUM;
-            }
-            break;
-
-        case PID_OUTPUT_SCHEDULE_MODE_MEDIUM:
-            if (abs_error > config->medium_exit_error)
-            {
-                return PID_OUTPUT_SCHEDULE_MODE_FAST;
-            }
-            if (abs_error < config->fine_enter_error)
-            {
-                return PID_OUTPUT_SCHEDULE_MODE_FINE;
-            }
-            break;
-
-        case PID_OUTPUT_SCHEDULE_MODE_FINE:
-        default:
-            if (abs_error > config->fine_exit_error)
-            {
-                return PID_OUTPUT_SCHEDULE_MODE_MEDIUM;
-            }
-            break;
-    }
-
-    return current_mode;
-}
 /**
  * @brief 初始化 PID 控制器
  * @param pid: PID 控制器指针
@@ -131,8 +81,6 @@ void PID_Init(PID_TypeDef *pid)
     pid->output_filter_tau_s = 0.0f;
     pid->output_slew_enable = false;
     pid->output_slew_rate = 0.0f;
-    pid->output_schedule_inited = false;
-    pid->output_schedule_mode = PID_OUTPUT_SCHEDULE_MODE_FAST;
     pid->output_shaper_inited = false;
     pid->output_shaper_state = 0.0f;
 
@@ -266,66 +214,6 @@ void PID_Output_Slew_Enable(PID_TypeDef *pid, bool enable, float slew_rate)
 
     pid->output_slew_enable = enable;
     pid->output_slew_rate = fabsf(slew_rate);
-}
-
-/**
- * @brief 复位 PID 输出调度状态
- * @param pid: PID 控制器指针
- * @param mode: 复位后的默认档位
- * @retval 无
- * @note  该接口不会重置 output_shaper_state，避免模式切换时引入额外跳变
- */
-void PID_Output_Schedule_Reset(PID_TypeDef *pid, PID_Output_Schedule_Mode_TypeDef mode)
-{
-    if (pid == NULL)
-    {
-        return;
-    }
-
-    pid->output_schedule_inited = false;
-    pid->output_schedule_mode = mode;
-}
-
-/**
- * @brief 按误差大小应用 PID 输出整形调度
- * @param pid: PID 控制器指针
- * @param abs_error: 当前误差绝对值
- * @param config: 输出整形调度配置
- * @retval 无
- * @note  调度器只修改输出低通与斜率限制参数，适合在每个控制周期调用一次
- */
-void PID_Output_Schedule_Apply(PID_TypeDef *pid, float abs_error, const PID_Output_Schedule_Config_TypeDef *config)
-{
-    if ((pid == NULL) || (config == NULL))
-    {
-        return;
-    }
-
-    abs_error = fabsf(abs_error);
-    pid->output_schedule_mode = PID_Select_Output_Schedule_Mode(pid->output_schedule_mode,
-                                                                pid->output_schedule_inited,
-                                                                abs_error,
-                                                                config);
-    pid->output_schedule_inited = true;
-
-    switch (pid->output_schedule_mode)
-    {
-        case PID_OUTPUT_SCHEDULE_MODE_FAST:
-            PID_Output_Filter_Enable(pid, config->fast_filter_tau_s > 0.0f, config->fast_filter_tau_s);
-            PID_Output_Slew_Enable(pid, config->fast_slew_rate > 0.0f, config->fast_slew_rate);
-            break;
-
-        case PID_OUTPUT_SCHEDULE_MODE_MEDIUM:
-            PID_Output_Filter_Enable(pid, config->medium_filter_tau_s > 0.0f, config->medium_filter_tau_s);
-            PID_Output_Slew_Enable(pid, config->medium_slew_rate > 0.0f, config->medium_slew_rate);
-            break;
-
-        case PID_OUTPUT_SCHEDULE_MODE_FINE:
-        default:
-            PID_Output_Filter_Enable(pid, config->fine_filter_tau_s > 0.0f, config->fine_filter_tau_s);
-            PID_Output_Slew_Enable(pid, config->fine_slew_rate > 0.0f, config->fine_slew_rate);
-            break;
-    }
 }
 
 /**

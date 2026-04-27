@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.22)
 
 #
 # This file is generated only once,
@@ -54,14 +54,15 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/Matrix/alg_matrix.c
     user_file/1_middlewares/Algorthm/DWT/alg_dwt.c
     user_file/1_middlewares/Algorthm/Quaternion/alg_quaternion.c
+    user_file/1_middlewares/Algorthm/YawFusion/yaw_fusion.c
     user_file/2_Device/BMI088/dvc_bmi088.c
     user_file/2_Device/Motor/dvc_motor.c
     user_file/2_Device/Motor/dvc_motor_protect.c
-    user_file/2_Device/VOFA/dvc_vofa.c
     user_file/2_Device/DR16/dvc_dr16.c
     user_file/2_Device/Manifold/dvc_manifold.c
-    user_file/3_Module/Gimbal/gimbal_sentry.c
-    user_file/3_Module/Gimbal/gimbal_sentry_target.c
+    user_file/3_Module/Sentry/gimbal_sentry_control.c
+    user_file/3_Module/Sentry/gimbal_sentry.c
+    user_file/3_Module/Sentry/gimbal_sentry_target.c
     user_file/3_Module/Gimbal/Gimbal.c
     user_file/4_Task/MyTask.c
 )
@@ -78,11 +79,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/Matrix
     user_file/1_middlewares/Algorthm/DWT
     user_file/1_middlewares/Algorthm/Quaternion
+    user_file/1_middlewares/Algorthm/YawFusion
     user_file/2_Device/BMI088
     user_file/2_Device/Motor
-    user_file/2_Device/VOFA
     user_file/2_Device/DR16
     user_file/2_Device/Manifold
+    user_file/3_Module/Sentry
     user_file/3_Module/Gimbal
     user_file/4_Task
 )
@@ -101,5 +103,4 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
-
 

@@ -1,15 +1,20 @@
+/**
+ * @file gimbal_sentry.c
+ * @brief 哨兵状态机实现。
+ */
 #include "gimbal_sentry.h"
 #include <math.h>
 #include <stdint.h>
 
+/** @brief 扫描相位使用的 2pi 常量。 */
 #define GIMBAL_SENTRY_TWO_PI 6.283185307f
 
 /**
- * @brief   限幅函数
- * @param   value: 待限幅的值
- * @param   min_value: 最小值
- * @param   max_value: 最大值
- * @retval  限幅后的值
+ * @brief 限幅输入值。
+ * @param value 待限幅的值。
+ * @param min_value 允许的最小值。
+ * @param max_value 允许的最大值。
+ * @return 限幅后的值。
  */
 static float Gimbal_Sentry_Clamp(float value, float min_value, float max_value)
 {
@@ -27,8 +32,12 @@ static float Gimbal_Sentry_Clamp(float value, float min_value, float max_value)
 }
 
 /**
- * @brief   以固定最大步长逼近目标
- * @note    用在丢目标回扫阶段，避免从跟踪目标瞬间跳回扫描轨迹
+ * @brief 以固定最大步长逼近目标值。
+ * @param current 当前值。
+ * @param target 目标值。
+ * @param max_step 单次允许的最大变化量。
+ * @return 逼近后的结果。
+ * @note 用在丢目标回扫阶段，避免从跟踪目标瞬间跳回扫描轨迹。
  */
 static float Gimbal_Sentry_Move_Towards(float current, float target, float max_step)
 {
@@ -46,7 +55,9 @@ static float Gimbal_Sentry_Move_Towards(float current, float target, float max_s
 }
 
 /**
- * @brief   相位限幅到 [0, 2pi)
+ * @brief 将相位约束到 `[0, 2pi)` 区间。
+ * @param phase_rad 原始相位，单位：rad。
+ * @return 包装后的相位，单位：rad。
  */
 static float Gimbal_Sentry_Wrap_Phase(float phase_rad)
 {
@@ -64,7 +75,11 @@ static float Gimbal_Sentry_Wrap_Phase(float phase_rad)
 }
 
 /**
- * @brief   推进单轴扫描正弦波相位
+ * @brief 推进单轴扫描正弦波相位。
+ * @param phase_rad 当前相位，单位：rad。
+ * @param frequency_hz 扫描频率，单位：Hz。
+ * @param dt_s 控制周期，单位：s。
+ * @return 推进后的相位，单位：rad。
  */
 static float Gimbal_Sentry_Scan_Phase_Step(float phase_rad, float frequency_hz, float dt_s)
 {
@@ -73,7 +88,10 @@ static float Gimbal_Sentry_Scan_Phase_Step(float phase_rad, float frequency_hz, 
 }
 
 /**
- * @brief   根据正弦波相位生成扫描目标
+ * @brief 根据正弦波相位生成扫描目标角。
+ * @param amplitude_deg 扫描幅值，单位：deg。
+ * @param phase_rad 当前相位，单位：rad。
+ * @return 扫描目标角，单位：deg。
  */
 static float Gimbal_Sentry_Scan_Target_Sine(float amplitude_deg, float phase_rad)
 {
@@ -81,7 +99,9 @@ static float Gimbal_Sentry_Scan_Target_Sine(float amplitude_deg, float phase_rad
 }
 
 /**
- * @brief   把内部目标缓存拷贝到输出结构
+ * @brief 将内部目标缓存拷贝到输出结构。
+ * @param handle 哨兵状态机句柄。
+ * @param output 输出结构体指针。
  */
 static void Gimbal_Sentry_Fill_Output(const Gimbal_Sentry_Handle_TypeDef *handle,
                                       Gimbal_Sentry_Output_TypeDef *output)
@@ -95,15 +115,20 @@ static void Gimbal_Sentry_Fill_Output(const Gimbal_Sentry_Handle_TypeDef *handle
     output->yaw_target_deg = handle->yaw_target_deg;
     output->state = handle->state;
 }
+
 /**
- * @brief   公开接口实现
- *
+ * @brief 初始化哨兵状态机。
+ * @param handle 哨兵状态机句柄。
  */
 void Gimbal_Sentry_Init(Gimbal_Sentry_Handle_TypeDef *handle)
 {
     Gimbal_Sentry_Reset(handle);
 }
 
+/**
+ * @brief 复位哨兵状态机到默认扫描态。
+ * @param handle 哨兵状态机句柄。
+ */
 void Gimbal_Sentry_Reset(Gimbal_Sentry_Handle_TypeDef *handle)
 {
     if (handle == NULL)
@@ -121,15 +146,16 @@ void Gimbal_Sentry_Reset(Gimbal_Sentry_Handle_TypeDef *handle)
     handle->yaw_target_deg = 0.0f;
     handle->pitch_target_deg = 0.0f;
 }
+
 /**
- * @brief   主更新函数，根据当前状态和输入计算输出目标
- * @param   handle: 哨兵状态句柄 
- * @param   config: 哨兵配置参数
- * @param   input: 哨兵输入（视觉目标）
- * @param   output: 哨兵输出（云台目标）
- * @note    1. 扫描轨迹持续推进，跟踪态丢目标后冻结轨迹点并进入回扫；回扫态优先重新跟踪，否则平滑贴回轨迹
- *          2. 状态机只根据 vision_target_available 切换状态，不直接处理原始协议里的 Target_Valid
- *          3. 所有状态最终都做一次物理/安全限幅，避免上层或视觉目标越界
+ * @brief 根据当前状态和输入计算输出目标。
+ * @param handle 哨兵状态机句柄。
+ * @param config 哨兵配置参数。
+ * @param input 哨兵输入，包含整理后的视觉目标信息。
+ * @param output 哨兵输出，包含目标角与当前状态。
+ * @note  1. 扫描轨迹持续推进，跟踪态丢目标后冻结轨迹点并进入回扫。
+ * @note  2. 回扫态若重新捕获目标则优先恢复跟踪，否则平滑贴回扫描轨迹。
+ * @note  3. 所有状态最终都会做一次物理/安全限幅。
  */
 void Gimbal_Sentry_Update(Gimbal_Sentry_Handle_TypeDef *handle,
                           const Gimbal_Sentry_Config_TypeDef *config,
@@ -246,10 +272,11 @@ void Gimbal_Sentry_Update(Gimbal_Sentry_Handle_TypeDef *handle,
                                                  config->yaw_max_deg);
     Gimbal_Sentry_Fill_Output(handle, output);
 }
+
 /**
- * @brief   获取当前状态
- * @param   handle: 哨兵状态句柄 
- * @retval  当前状态枚举值
+ * @brief 获取当前哨兵状态。
+ * @param handle 哨兵状态机句柄。
+ * @return 当前状态枚举值；当句柄为空时返回扫描态。
  */
 Gimbal_Sentry_State_TypeDef Gimbal_Sentry_Get_State(const Gimbal_Sentry_Handle_TypeDef *handle)
 {

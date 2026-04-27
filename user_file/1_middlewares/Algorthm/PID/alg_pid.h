@@ -6,38 +6,6 @@
 #include <math.h>
 #include <sys/types.h>
 
-/**
- * @brief PID 输出整形调度档位。
- * @note  调度器根据误差大小在 FAST / MEDIUM / FINE 三档之间切换，
- *        用于在大误差时保持响应速度、在近目标区降低抖动。
- */
-typedef enum
-{
-    PID_OUTPUT_SCHEDULE_MODE_FAST = 0,
-    PID_OUTPUT_SCHEDULE_MODE_MEDIUM,
-    PID_OUTPUT_SCHEDULE_MODE_FINE
-} PID_Output_Schedule_Mode_TypeDef;
-
-/**
- * @brief PID 输出整形调度配置。
- * @note  调度器只关心误差绝对值，误差单位由调用者自行保证一致。
- */
-typedef struct
-{
-    float medium_enter_error;
-    float medium_exit_error;
-    float fine_enter_error;
-    float fine_exit_error;
-
-    float fast_filter_tau_s;
-    float medium_filter_tau_s;
-    float fine_filter_tau_s;
-
-    float fast_slew_rate;
-    float medium_slew_rate;
-    float fine_slew_rate;
-} PID_Output_Schedule_Config_TypeDef;
-
 typedef struct {
     // ===== 1. PID参数 =====
     float Kp;           // 比例系数
@@ -100,8 +68,6 @@ typedef struct {
     float output_filter_tau_s; // 输出低通时间常数（秒）
     bool output_slew_enable;   // 输出斜率限制使能
     float output_slew_rate;    // 输出最大变化率（单位/秒）
-    bool output_schedule_inited; // 输出调度状态是否已初始化
-    PID_Output_Schedule_Mode_TypeDef output_schedule_mode; // 当前输出调度档位
     bool output_shaper_inited; // 输出整形状态是否已初始化
     float output_shaper_state; // 输出整形内部状态
 
@@ -129,26 +95,6 @@ void PID_Output_Filter_Enable(PID_TypeDef *pid, bool enable, float tau_s);
  *        以减少输出端整形带来的相位滞后。
  */
 void PID_Output_Slew_Enable(PID_TypeDef *pid, bool enable, float slew_rate);
-
-/**
- * @brief 复位 PID 输出调度状态。
- * @param pid PID 控制器指针
- * @param mode 复位后的默认档位
- * @retval 无
- * @note  该接口只复位档位状态，不重置输出整形内部状态，
- *        以避免切换模式时引入额外输出突变。
- */
-void PID_Output_Schedule_Reset(PID_TypeDef *pid, PID_Output_Schedule_Mode_TypeDef mode);
-
-/**
- * @brief 按误差大小为 PID 输出整形选择 FAST / MEDIUM / FINE 档位。
- * @param pid PID 控制器指针
- * @param abs_error 当前误差绝对值
- * @param config 三档输出整形配置
- * @retval 无
- * @note  该接口内部带滞回切档逻辑，适合在每个控制周期调用一次。
- */
-void PID_Output_Schedule_Apply(PID_TypeDef *pid, float abs_error, const PID_Output_Schedule_Config_TypeDef *config);
 
 void PID_Output_Shaper_Reset(PID_TypeDef *pid, float init_output);
 

@@ -204,24 +204,27 @@ Gimbal.c 现在只做适配：
 当前视觉协议是固定长度二进制格式：
 
 接收帧格式：
-   [Header][Yaw(float)][Pitch(float)][Tail]
+   [Header][Yaw(float)][Pitch(float)][Target_Valid(uint8_t)][Rx_Manifold_ID(uint8_t)][Tail]
 
 发送帧格式：
    [Header][Yaw(float)][Pitch(float)][Tail]
 
 说明：
    - Header 为 1 字节
-   - Pitch 为 4 字节 float
    - Yaw 为 4 字节 float
+   - Pitch 为 4 字节 float
+   - Target_Valid 为 1 字节，0 表示无目标，非 0 表示有目标
+   - Rx_Manifold_ID 为 1 字节，表示视觉当前目标 ID
    - Tail 为 1 字节
+   - 接收总长度为 12 字节，发送总长度为 10 字节
 
 当前代码默认：
-   Header = 0xFE
-   Tail   = 0xFF
+   Header = MANIFOLD_USB_FRAME_HEADER = 0xFE
+   Tail   = MANIFOLD_USB_FRAME_TAIL   = 0xFF
 
 初始化位置在：
    Gimbal_Init()
-   Manifold_Init(&Tx_Data, 0xFE, 0xFF, Manifold_Sentry_Mode_ENABLE);
+   Manifold_Init(&Tx_Data, MANIFOLD_USB_FRAME_HEADER, MANIFOLD_USB_FRAME_TAIL, Manifold_Sentry_Mode_ENABLE);
 
 
 4.5 视觉目标角的语义
@@ -251,12 +254,13 @@ Gimbal.c 现在只做适配：
 4.6 视觉新鲜度判定机制
 ----------------------------------------
 
-当前协议里没有 target_valid、confidence、shoot_flag 这些字段。
+当前协议已经有 target_valid 和 Rx_Manifold_ID 两个字段，
+但还没有 confidence、shoot_flag 这些扩展信息。
 因此当前工程采用的策略是：
 
 1. 每收到一帧合法视觉数据，就把 Manifold_USB_Rx_Frame_Seq 加 1
-2. Gimbal 控制层记录最近一次看到“新序号”的时间
-3. 如果超过设定时间没有看到新帧，就认为目标失效
+2. 只有 Target_Valid 非 0 时，Gimbal 控制层才会刷新“最后一次有效目标”缓存
+3. 如果超过设定时间没有新的有效目标，就认为目标失效
 
 当前默认超时时间：
    GIMBAL_VISION_TRACK_TIMEOUT_MS = 120 ms
@@ -269,15 +273,14 @@ Gimbal.c 现在只做适配：
 2. 如果视觉停止输出
    则 120ms 后会退出 TRACK_ARMOR
 
-3. 如果视觉还在线，但一直重复发送旧值
+3. 如果视觉还在线，但一直重复发送旧值且 Target_Valid 非 0
    当前代码仍然会认为“有新鲜目标”
    因为当前只看有没有新帧，不看目标内容是否变化
 
 如果后续你希望判定更稳，建议升级协议，加：
-   - target_valid
    - confidence
-   - armor_id
    - target_lost
+   - shoot_flag
 
 
 4.7 当前扫描参数说明
@@ -329,7 +332,7 @@ Gimbal.c 现在只做适配：
    Gimbal_Init() 会初始化 USB、CAN、IMU、电机 PID、视觉收发
 
 步骤 2：确保视觉端按当前协议发送目标角
-   必须发送 [Header][Pitch][Yaw][Tail]
+   必须发送 [Header][Yaw][Pitch][Target_Valid][Rx_Manifold_ID][Tail]
    Header/Tail 必须和控制板一致
 
 步骤 3：云台进入 SCAN
@@ -355,14 +358,14 @@ Gimbal.c 现在只做适配：
 4.9 当前方案的边界和注意事项
 ----------------------------------------
 
-1. 当前没有 target_valid 位
-   目标是否存在完全依赖“最近是否收到新鲜帧”
-
-2. 当前没有 confidence
+1. 当前没有 confidence
    不能根据置信度筛掉抖动目标或误识别目标
 
-3. 当前没有 armor_id
-   当视觉在不同装甲板之间切换时，控制板无法区分“还是同一个目标”还是“已经换目标”
+2. 当前已经有 target_valid 位
+   但上层当前采用的是“最后一次有效目标 + 超时”策略，不是“收到无目标帧就立刻清空”
+
+3. 当前已经有 Rx_Manifold_ID
+   但控制层暂时只负责透传和缓存，还没有基于目标 ID 做切换策略
 
 4. 当前没有速度前馈
    如果目标快速横移，可能会有一定跟踪滞后
@@ -405,7 +408,7 @@ Gimbal.c 现在只做适配：
    - 平滑回到扫描轨迹
    - 恢复 SCAN
 
-第五步：再考虑加入 confidence / target_valid
+第五步：再考虑加入 confidence / target_lost
    这样状态切换会更靠谱
 
 
@@ -920,10 +923,9 @@ yaw:
 
 1. 视觉协议升级
    增加：
-   - target_valid
    - confidence
-   - armor_id
    - target_lost
+   - shoot_flag
 
 2. 状态机升级
    增加：
