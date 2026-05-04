@@ -204,7 +204,7 @@ Gimbal.c 现在只做适配：
 当前视觉协议是固定长度二进制格式：
 
 接收帧格式：
-   [Header][Yaw(float)][Pitch(float)][Target_Valid(uint8_t)][Rx_Manifold_ID(uint8_t)][Tail]
+   [Header][Yaw(float)][Pitch(float)][Target_ID(uint8_t)][Tail]
 
 发送帧格式：
    [Header][Yaw(float)][Pitch(float)][Tail]
@@ -213,10 +213,11 @@ Gimbal.c 现在只做适配：
    - Header 为 1 字节
    - Yaw 为 4 字节 float
    - Pitch 为 4 字节 float
-   - Target_Valid 为 1 字节，0 表示无目标，非 0 表示有目标
-   - Rx_Manifold_ID 为 1 字节，表示视觉当前目标 ID
+   - Target_ID 为 1 字节，发送实际敌方 ID
+   - Target_ID 为 0 表示无目标，非 0 表示有目标并允许跟随
+   - 电控会把收到的实际 ID 同步缓存到 Rx_Data.Target_ID 和 Rx_Data.Enemy_ID
    - Tail 为 1 字节
-   - 接收总长度为 12 字节，发送总长度为 10 字节
+   - 接收总长度为 11 字节，发送总长度为 10 字节
 
 当前代码默认：
    Header = MANIFOLD_USB_FRAME_HEADER = 0xFE
@@ -254,12 +255,12 @@ Gimbal.c 现在只做适配：
 4.6 视觉新鲜度判定机制
 ----------------------------------------
 
-当前协议已经有 target_valid 和 Rx_Manifold_ID 两个字段，
+当前协议已经有 Target_ID 字段，
 但还没有 confidence、shoot_flag 这些扩展信息。
 因此当前工程采用的策略是：
 
 1. 每收到一帧合法视觉数据，就把 Manifold_USB_Rx_Frame_Seq 加 1
-2. 只有 Target_Valid 非 0 时，Gimbal 控制层才会刷新“最后一次有效目标”缓存
+2. 只有 Target_ID 非 0 时，Gimbal 控制层才会刷新“最后一次有效目标”缓存
 3. 如果超过设定时间没有新的有效目标，就认为目标失效
 
 当前默认超时时间：
@@ -273,7 +274,7 @@ Gimbal.c 现在只做适配：
 2. 如果视觉停止输出
    则 120ms 后会退出 TRACK_ARMOR
 
-3. 如果视觉还在线，但一直重复发送旧值且 Target_Valid 非 0
+3. 如果视觉还在线，但一直重复发送旧值且 Target_ID 非 0
    当前代码仍然会认为“有新鲜目标”
    因为当前只看有没有新帧，不看目标内容是否变化
 
@@ -332,7 +333,7 @@ Gimbal.c 现在只做适配：
    Gimbal_Init() 会初始化 USB、CAN、IMU、电机 PID、视觉收发
 
 步骤 2：确保视觉端按当前协议发送目标角
-   必须发送 [Header][Yaw][Pitch][Target_Valid][Rx_Manifold_ID][Tail]
+   必须发送 [Header][Yaw][Pitch][Target_ID][Tail]
    Header/Tail 必须和控制板一致
 
 步骤 3：云台进入 SCAN
@@ -361,10 +362,10 @@ Gimbal.c 现在只做适配：
 1. 当前没有 confidence
    不能根据置信度筛掉抖动目标或误识别目标
 
-2. 当前已经有 target_valid 位
+2. 当前已经有 Target_ID 位
    但上层当前采用的是“最后一次有效目标 + 超时”策略，不是“收到无目标帧就立刻清空”
 
-3. 当前已经有 Rx_Manifold_ID
+3. 当前已经有 Enemy_ID 本地缓存
    但控制层暂时只负责透传和缓存，还没有基于目标 ID 做切换策略
 
 4. 当前没有速度前馈

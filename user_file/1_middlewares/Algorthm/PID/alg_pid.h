@@ -1,3 +1,9 @@
+/**
+ * @file alg_pid.h
+ * @brief PID 控制器类定义。
+ * @details
+ * 本文件定义 `Class_PID` PID 控制器对象。
+ */
 #ifndef __ALG_PID_H__
 #define __ALG_PID_H__
 
@@ -6,104 +12,80 @@
 #include <math.h>
 #include <sys/types.h>
 
-typedef struct {
-    // ===== 1. PID参数 =====
-    float Kp;           // 比例系数
-    float Ki;           // 积分系数
-    float Kd;           // 微分系数
-    float FeedForward;  // 前馈系数
-    
-    float P_out;         // 比例输出
-    float I_out;         // 积分输出
-    float D_out;         // 微分输出
-    float FeedForward_out; // 前馈输出
-    float Friction_Compensation_out; // 摩擦补偿输出
-    
-    // ===== 2. 运行状态 =====
-    float target;     // 目标值
-    float prev_target;  // 上一次目标值（用于微分先行 和 前馈）
-    float output;       // 控制输出
-    float Input;        // 当前输入值
-    
-    // ===== 3. 误差相关 =====
-    float error;        // 当前误差
-    float prev_error;   // 上一次误差（用于微分）
-    float integral;     // 积分累加和
-    
-    
-    // ===== 4. 输出限幅 =====
-    float out_min;      // 输出最小值
-    float out_max;      // 输出最大值
-    
-    // ===== 5. 积分限幅（抗积分饱和）=====
-    float integral_min; // 积分项最小值
-    float integral_max; // 积分项最大值
-    
-    // ===== 6. 目标限幅 =====
-    bool target_limit_enable;  // 目标限幅使能
-    float target_limit_min;    // 目标限幅最小值
-    float target_limit_max;    // 目标限幅最大值
 
-    // ===== 7. 变速积分 =====
-    bool integral_separation_enable; // 积分分离使能
-    float integral_separation_threshold_A; // 积分分离阈值
-    float integral_separation_threshold_B; // 积分分离阈值
-
-    // ===== 8. 微分先行 =====
-    bool differential_enable; // 微分先行使能
-
-    // ===== 9. 死区 =====
-    bool deadband_enable; // 死区使能
-    float deadband; // 死区临界值值
-
-    // ===== 10. 摩擦补偿（可选）=====
-    bool friction_comp_enable; // 摩擦补偿使能
-    float friction_fc; // 库仑摩擦补偿系数
-    float friction_bv; // 粘性摩擦补偿系数
-    float friction_w_eps; // 平滑参数，避免符号函数抖振
-    bool friction_use_target_omega; // true=使用目标值作为omega，false=使用输入值作为omega
-
-    // ===== 11. 输出整形（可选）=====
-    bool output_filter_enable; // 输出低通使能
-    float output_filter_tau_s; // 输出低通时间常数（秒）
-    bool output_slew_enable;   // 输出斜率限制使能
-    float output_slew_rate;    // 输出最大变化率（单位/秒）
-    bool output_shaper_inited; // 输出整形状态是否已初始化
-    float output_shaper_state; // 输出整形内部状态
-
-    // ===== 12. 时间间隔 =====
-    float dt; // 时间间隔（单位：秒）
-} PID_TypeDef;
-void PID_Init(PID_TypeDef *pid);
-
-void PID_Differential_Enable(PID_TypeDef *pid,bool enable);
-
-void PID_Deadband_Enable(PID_TypeDef *pid,bool enable,float deadband);
-
-void PID_Friction_Compensation_Enable(PID_TypeDef *pid, bool enable, float Fc, float Bv, float w_eps, bool use_target_omega);
-
-void PID_Output_Filter_Enable(PID_TypeDef *pid, bool enable, float tau_s);
-
+#ifdef __cplusplus
 /**
- * @brief 使能/禁用 PID 输出斜率限制。
- * @param pid PID 控制器指针
- * @param enable 是否使能
- * @param slew_rate 输出增大时的最大变化率（单位/秒）
- * @retval 无
- * @note  当前实现为非对称斜率限制：
- *        输出增大时按 slew_rate 限制，输出回收/反向时内部使用更快的释放速率，
- *        以减少输出端整形带来的相位滞后。
+ * @class Class_PID
+ * @brief PID 控制器对象。
+ * @details
+ * 该对象维护 PID 配置参数、运行时状态以及控制计算能力。
  */
-void PID_Output_Slew_Enable(PID_TypeDef *pid, bool enable, float slew_rate);
+class Class_PID
+{
+public:
+    float Kp;                        /**< 比例系数 */
+    float Ki;                        /**< 积分系数 */
+    float Kd;                        /**< 微分系数 */
+    float FeedForward;               /**< 前馈系数 */
+    float P_out;                     /**< 本次计算得到的比例输出 */
+    float I_out;                     /**< 本次计算得到的积分输出 */
+    float D_out;                     /**< 本次计算得到的微分输出 */
+    float FeedForward_out;           /**< 本次计算得到的前馈输出 */
+    float Friction_Compensation_out; /**< 本次计算得到的摩擦补偿输出 */
+    float Gravity_Compensation_out;  /**< 本次计算得到的重力补偿输出 */
+    float target;                    /**< 当前控制目标值 */
+    float prev_target;               /**< 上一次控制目标值 */
+    float output;                    /**< 当前总输出 */
+    float Input;                     /**< 当前输入值 */
+    float error;                     /**< 当前误差 */
+    float prev_error;                /**< 上一次误差 */
+    float integral;                  /**< 当前积分累计值 */
+    float out_min;                   /**< 输出最小限幅 */
+    float out_max;                   /**< 输出最大限幅 */
+    float integral_min;              /**< 积分项最小限幅 */
+    float integral_max;              /**< 积分项最大限幅 */
+    bool target_limit_enable;        /**< 是否启用目标值限幅 */
+    float target_limit_min;          /**< 目标值下限 */
+    float target_limit_max;          /**< 目标值上限 */
+    bool integral_separation_enable; /**< 是否启用变速积分 */
+    float integral_separation_threshold_A; /**< 变速积分强抑制阈值 */
+    float integral_separation_threshold_B; /**< 变速积分弱抑制阈值 */
+    bool differential_enable;        /**< 是否启用微分先行 */
+    bool deadband_enable;            /**< 是否启用死区 */
+    float deadband;                  /**< 死区阈值 */
+    bool friction_comp_enable;       /**< 是否启用摩擦补偿 */
+    float friction_fc;               /**< 库仑摩擦补偿系数 */
+    float friction_bv;               /**< 粘性摩擦补偿系数 */
+    float friction_w_eps;            /**< 摩擦补偿平滑参数 */
+    bool friction_use_target_omega;  /**< 摩擦补偿是否使用目标速度 */
+    bool gravity_comp_enable;        /**< 是否启用重力补偿 */
+    float gravity_comp_kg;           /**< 重力补偿系数 */
+    float gravity_comp_angle_deg;    /**< 重力补偿使用的姿态角，单位度 */
+    bool gravity_comp_reverse;       /**< 是否反向输出重力补偿 */
+    bool output_filter_enable;       /**< 是否启用输出低通整形 */
+    float output_filter_tau_s;       /**< 输出低通时间常数，单位秒 */
+    bool output_slew_enable;         /**< 是否启用输出斜率限制 */
+    float output_slew_rate;          /**< 输出最大变化率，单位每秒 */
+    bool output_shaper_inited;       /**< 输出整形状态是否已初始化 */
+    float output_shaper_state;       /**< 当前输出整形内部状态 */
+    float dt;                        /**< 本次控制周期，单位秒 */
 
-void PID_Output_Shaper_Reset(PID_TypeDef *pid, float init_output);
-
-void PID_Integral_Separation_Enable(PID_TypeDef *pid,bool enable,float threshold_A,float threshold_B);
-
-void PID_Target_Limit_Enable(PID_TypeDef *pid,bool enable,float min,float max);
-
-void PID_Set_Parameters(PID_TypeDef *pid,float P,float I,float D,float FeedForward,float integral_min,float integral_max,float out_min,float out_max);
-
-float PID_Calculate(PID_TypeDef *pid,float Input,float Target,float dt);
+    void Init();
+    void DifferentialEnable(bool enable);
+    void DeadbandEnable(bool enable, float deadband_value);
+    void FrictionCompensationEnable(bool enable, float fc, float bv, float w_eps, bool use_target_omega);
+    void GravityCompensationEnable(bool enable, float kg, bool reverse_output);
+    void GravityCompensationSetAngle(float angle_deg);
+    void OutputFilterEnable(bool enable, float tau_s);
+    void OutputSlewEnable(bool enable, float slew_rate);
+    void OutputShaperReset(float init_output);
+    void IntegralSeparationEnable(bool enable, float threshold_a, float threshold_b);
+    void TargetLimitEnable(bool enable, float min, float max);
+    void SetParameters(float p, float i, float d, float feed_forward,
+                       float integral_min_value, float integral_max_value,
+                       float out_min_value, float out_max_value);
+    float Calculate(float input_value, float target_value, float dt_value);
+};
+#endif
 
 #endif /* __ALG_PID_H__ */

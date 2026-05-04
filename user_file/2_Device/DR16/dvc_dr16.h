@@ -1,3 +1,9 @@
+/**
+ * @file dvc_dr16.h
+ * @brief DR16 遥控接收设备接口与管理对象定义。
+ * @details
+ * 本文件定义 `Class_DR16` DR16 接收管理对象。
+ */
 #ifndef __DVC_DR16_H__
 #define __DVC_DR16_H__
 
@@ -14,7 +20,7 @@
 #define DR16_KEY_PRESSED    1
 
 #define DR16_ROCKER_OFFSET  1024
-#define DR16_ROCKER_RANGE   1320   // 1684-364
+#define DR16_ROCKER_RANGE   1320
 
 #define DR16_KEY_W      0
 #define DR16_KEY_S      1
@@ -52,45 +58,65 @@ typedef enum
     DR16_KEY_STATUS_TRIG_PRESSED_FREE,
 } DR16_Key_Status_TypeDef;
 
-// 解析后的遥控器数据（供应用程序使用）
-typedef struct
+/**
+ * @brief DR16 应用层解析结果。
+ * @details
+ * 保存归一化摇杆值、鼠标值、原始拨杆与按键状态，以及边沿触发后的状态机结果。
+ */
+typedef struct DR16_DataTypeDef
 {
-    float right_x;
-    float right_y;
-    float left_x;
-    float left_y;
-
-    float mouse_x;
-    float mouse_y;
-    float mouse_z;
-
-    DR16_Switch_Status_TypeDef left_switch;
-    DR16_Switch_Status_TypeDef right_switch;
-
-    DR16_Key_Status_TypeDef mouse_left;
-    DR16_Key_Status_TypeDef mouse_right;
-
-    DR16_Key_Status_TypeDef key[16];
-
-    uint8_t raw_s1;
-    uint8_t raw_s2;
-    uint8_t raw_mouse_l;
-    uint8_t raw_mouse_r;
-    uint16_t raw_key;
-
-    uint8_t prev_raw_s1;
-    uint8_t prev_raw_s2;
-    uint8_t prev_raw_mouse_l;
-    uint8_t prev_raw_mouse_r;
-    uint16_t prev_raw_key;
+    float right_x;  /**< 右摇杆 X，归一化到 [-1, 1] */
+    float right_y;  /**< 右摇杆 Y，归一化到 [-1, 1] */
+    float left_x;   /**< 左摇杆 X，归一化到 [-1, 1] */
+    float left_y;   /**< 左摇杆 Y，归一化到 [-1, 1] */
+    float mouse_x;  /**< 鼠标 X，归一化到 [-1, 1] */
+    float mouse_y;  /**< 鼠标 Y，归一化到 [-1, 1] */
+    float mouse_z;  /**< 鼠标 Z，归一化到 [-1, 1] */
+    uint8_t raw_s1; /**< 左拨杆原始值 */
+    uint8_t raw_s2; /**< 右拨杆原始值 */
+    uint8_t prev_raw_s1; /**< 上一周期左拨杆原始值 */
+    uint8_t prev_raw_s2; /**< 上一周期右拨杆原始值 */
+    uint8_t raw_mouse_l; /**< 鼠标左键原始值 */
+    uint8_t raw_mouse_r; /**< 鼠标右键原始值 */
+    uint8_t prev_raw_mouse_l; /**< 上一周期鼠标左键原始值 */
+    uint8_t prev_raw_mouse_r; /**< 上一周期鼠标右键原始值 */
+    uint16_t raw_key;        /**< 当前键盘 16 位原始位图 */
+    uint16_t prev_raw_key;   /**< 上一周期键盘 16 位原始位图 */
+    DR16_Switch_Status_TypeDef left_switch;   /**< 左拨杆状态机输出 */
+    DR16_Switch_Status_TypeDef right_switch;  /**< 右拨杆状态机输出 */
+    DR16_Key_Status_TypeDef mouse_left;       /**< 鼠标左键状态机输出 */
+    DR16_Key_Status_TypeDef mouse_right;      /**< 鼠标右键状态机输出 */
+    DR16_Key_Status_TypeDef key[16];          /**< 16 个键盘键状态机输出 */
 } DR16_DataTypeDef;
 
-void DR16_Init(UART_HandleTypeDef *huart);
-void DR16_Process(DR16_DataTypeDef *dr16);
+#ifdef __cplusplus
 /**
- * @brief DR16 1ms 周期回调函数
- * @note  非官方
+ * @class Class_DR16
+ * @brief DR16 遥控接收管理对象。
+ * @details
+ * 负责 DR16 串口接收初始化、最新帧缓存、协议解析和按键状态机更新。
  */
-void DR16_Timer1msCallback(DR16_DataTypeDef *dr16);
+class Class_DR16
+{
+public:
+    UART_HandleTypeDef *Huart;                     /**< 关联的 UART 句柄 */
+    uint8_t Frame_Buffer[2][DR16_FRAME_LEN];      /**< 接收双缓冲 */
+    volatile uint8_t Ready_Index;                 /**< 当前可供读取的缓冲区索引 */
+    volatile uint8_t Has_New_Frame;               /**< 是否存在未消费的新帧 */
+
+    void Init(UART_HandleTypeDef *huart);
+    void Process(DR16_DataTypeDef *dr16);
+    void Timer1msCallback(DR16_DataTypeDef *dr16);
+    void RxCallback(uint8_t *data, uint16_t len);
+
+private:
+    float Clamp(float val, float min_val, float max_val) const;
+    uint8_t SanitizeSwitch(uint8_t sw) const;
+    uint8_t FetchLatestFrame(uint8_t *out_frame);
+    void JudgeSwitch(DR16_Switch_Status_TypeDef *sw, uint8_t now, uint8_t prev);
+    void JudgeKey(DR16_Key_Status_TypeDef *key, uint8_t now, uint8_t prev);
+};
+extern Class_DR16 DR16_Manage_Object;
+#endif
 
 #endif /* __DVC_DR16_H__ */

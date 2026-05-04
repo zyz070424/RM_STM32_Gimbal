@@ -1,3 +1,9 @@
+/**
+ * @file drv_usart.h
+ * @brief USART 驱动接口与管理对象定义。
+ * @details
+ * 本文件定义 `Class_UART_Manage_Object` USART 软件管理对象。
+ */
 #ifndef DRV_USART_H__
 #define DRV_USART_H__
 
@@ -7,33 +13,50 @@
 #define UART_BUFFER_SIZE 256
 #define UART_TX_BUFFER_SIZE 256
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*UART_Callback)(uint8_t *buffer, uint16_t length);
 
-struct Struct_UART_Manage_Object
+#ifdef __cplusplus
+}
+#endif
+
+
+#ifdef __cplusplus
+/**
+ * @class Class_UART_Manage_Object
+ * @brief UART 软件管理对象。
+ * @details
+ * 一个对象对应一路串口外设，负责保存 HAL 句柄、维护双缓冲接收区、
+ * 维护 DMA 发送缓存，并在 HAL 官方回调到来时完成状态切换。
+ */
+class Class_UART_Manage_Object
 {
-    // UART句柄
-    UART_HandleTypeDef *huart;
-    UART_Callback Callback_Function;
+public:
+    UART_HandleTypeDef *huart;              /**< 关联的 HAL UART 句柄 */
+    UART_Callback Callback_Function;        /**< 上层接收回调函数 */
+    uint8_t Rx_Buffer_0[UART_BUFFER_SIZE];  /**< 接收缓冲区 0 */
+    uint8_t Rx_Buffer_1[UART_BUFFER_SIZE];  /**< 接收缓冲区 1 */
+    uint8_t *Rx_Buffer_Active;              /**< 当前由 HAL 写入的缓冲区 */
+    uint8_t *Rx_Buffer_Ready;               /**< 最近一次接收完成的缓冲区 */
+    uint8_t Tx_Buffer[UART_TX_BUFFER_SIZE]; /**< DMA 发送缓存 */
+    volatile uint8_t Tx_Busy;               /**< 当前是否存在发送任务 */
 
-    // 双缓冲适配的接收缓冲区
-    uint8_t Rx_Buffer_0[UART_BUFFER_SIZE];
-    uint8_t Rx_Buffer_1[UART_BUFFER_SIZE];
+    void Init(UART_HandleTypeDef *uart_handle, UART_Callback callback);
+    HAL_StatusTypeDef SendData(const uint8_t *data, uint16_t len);
+    void RxEventCallback(uint16_t size);
+    void TxCpltCallback();
+    void ErrorCallback();
 
-    // 正在接收的缓冲区
-    uint8_t *Rx_Buffer_Active;
-    // 接收完毕的缓冲区
-    uint8_t *Rx_Buffer_Ready;
-
-    // DMA发送缓存（避免上层传入栈内存导致DMA访问无效地址）
-    uint8_t Tx_Buffer[UART_TX_BUFFER_SIZE];
-    volatile uint8_t Tx_Busy;
+private:
+    HAL_StatusTypeDef StartRx();
+    void Reinit();
 };
-
-extern struct Struct_UART_Manage_Object UART1_Manage_Object;
-extern struct Struct_UART_Manage_Object UART3_Manage_Object;
-extern struct Struct_UART_Manage_Object UART6_Manage_Object;
-
-void USART_Init(UART_HandleTypeDef *huart, UART_Callback callback);
-HAL_StatusTypeDef USART_SendData(UART_HandleTypeDef *huart, const uint8_t *data, uint16_t len);
+extern Class_UART_Manage_Object UART1_Manage_Object;
+extern Class_UART_Manage_Object UART3_Manage_Object;
+extern Class_UART_Manage_Object UART6_Manage_Object;
+#endif
 
 #endif /* DRV_USART_H__ */

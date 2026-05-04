@@ -1,6 +1,9 @@
 /**
  * @file gimbal_sentry_control.h
- * @brief 哨兵模式控制参数接口定义。
+ * @brief 哨兵模式控制参数管理对象定义。
+ * @details
+ * 本文件定义哨兵模式控制配置与
+ * `Class_Gimbal_Sentry_Control` 管理对象。
  */
 #ifndef __GIMBAL_SENTRY_CONTROL_H__
 #define __GIMBAL_SENTRY_CONTROL_H__
@@ -24,51 +27,47 @@ typedef struct
 {
     float pitch_angle_feedforward;       /**< 扫描/回扫态 pitch 角度环前馈 */
     float yaw_angle_feedforward;         /**< 扫描/回扫态 yaw 角度环前馈 */
-    float sentry_shaper_filter_tau_s;    /**< 扫描/回扫态输出整形低通时间常数，单位：s */
-    float pitch_sentry_shaper_slew_rate; /**< 扫描/回扫态 pitch 输出斜率限制，单位：deg/s */
-    float yaw_sentry_shaper_slew_rate;   /**< 扫描/回扫态 yaw 输出斜率限制，单位：deg/s */
-    float vision_shaper_filter_tau_s;    /**< 跟踪态输出整形低通时间常数，单位：s */
-    float pitch_vision_shaper_slew_rate; /**< 跟踪态 pitch 输出斜率限制，单位：deg/s */
-    float yaw_vision_shaper_slew_rate;   /**< 跟踪态 yaw 输出斜率限制，单位：deg/s */
-    float target_reset_pitch_deg;        /**< 触发 pitch 角度环重置的目标突变量阈值，单位：deg */
-    float target_reset_yaw_deg;          /**< 触发 yaw 角度环重置的目标突变量阈值，单位：deg */
+    float sentry_shaper_filter_tau_s;    /**< 扫描/回扫态输出整形低通常数 */
+    float pitch_sentry_shaper_slew_rate; /**< 扫描/回扫态 pitch 输出斜率限制 */
+    float yaw_sentry_shaper_slew_rate;   /**< 扫描/回扫态 yaw 输出斜率限制 */
+    float vision_shaper_filter_tau_s;    /**< 跟踪态输出整形低通常数 */
+    float pitch_vision_shaper_slew_rate; /**< 跟踪态 pitch 输出斜率限制 */
+    float yaw_vision_shaper_slew_rate;   /**< 跟踪态 yaw 输出斜率限制 */
+    float target_reset_pitch_deg;        /**< 触发 pitch 角度环重置的目标突变量阈值 */
+    float target_reset_yaw_deg;          /**< 触发 yaw 角度环重置的目标突变量阈值 */
 } Gimbal_Sentry_Control_Config_TypeDef;
 
+#ifdef __cplusplus
 /**
- * @brief 初始化哨兵控制模块。
- * @param config 哨兵控制配置。
+ * @class Class_Gimbal_Sentry_Control
+ * @brief 哨兵模式控制参数管理对象。
+ * @details
+ * 负责在扫描态、跟踪态和丢目标回扫态之间切换 PID 前馈与输出整形参数，
+ * 同时维护角度环 PID 动态状态重置事件判定缓存。
  */
-void Gimbal_Sentry_Control_Init(const Gimbal_Sentry_Control_Config_TypeDef *config);
+class Class_Gimbal_Sentry_Control
+{
+public:
+    Gimbal_Sentry_Control_Config_TypeDef config;   /**< 控制模块配置缓存 */
+    uint8_t initialized;                           /**< 控制模块初始化完成标志 */
+    uint8_t params_applied;                        /**< 当前状态对应参数是否已下发 */
+    Gimbal_Sentry_State_TypeDef last_param_state;  /**< 上次下发参数时的状态 */
+    Gimbal_Sentry_State_TypeDef last_reset_state;  /**< 上次判定重置事件时的状态 */
+    float last_pitch_target_deg;                   /**< 上次判定重置事件时的 pitch 目标角 */
+    float last_yaw_target_deg;                     /**< 上次判定重置事件时的 yaw 目标角 */
 
-/**
- * @brief 按当前哨兵状态切换控制链参数。
- * @param pitch_motor pitch 电机对象。
- * @param yaw_motor yaw 电机对象。
- * @param state 当前哨兵状态。
- */
-void Gimbal_Sentry_Control_Apply_Mode_Params(Motor_TypeDef *pitch_motor,
-                                             Motor_TypeDef *yaw_motor,
-                                             Gimbal_Sentry_State_TypeDef state);
-
-/**
- * @brief 检查当前拍是否需要重置角度环 PID 动态状态。
- * @param state 当前哨兵状态。
- * @param pitch_target_deg 当前 pitch 目标角，单位：deg。
- * @param yaw_target_deg 当前 yaw 目标角，单位：deg。
- * @return `1` 表示需要重置，`0` 表示不需要。
- */
-uint8_t Gimbal_Sentry_Control_Angle_PID_Reset_Event_Check(Gimbal_Sentry_State_TypeDef state,
-                                                          float pitch_target_deg,
-                                                          float yaw_target_deg);
-
-/**
- * @brief 重置角度环 PID 的动态状态。
- * @param pid 需要重置的 PID 对象。
- * @param target_now 当前目标角。
- * @param output_now 当前实际输出角。
- */
-void Gimbal_Sentry_Control_Reset_Angle_PID_Dynamic_State(PID_TypeDef *pid,
-                                                         float target_now,
-                                                         float output_now);
+    void Init(const Gimbal_Sentry_Control_Config_TypeDef *config);
+    void ApplyModeParams(Class_Motor *pitch_motor,
+                         Class_Motor *yaw_motor,
+                         Gimbal_Sentry_State_TypeDef state);
+    uint8_t AnglePidResetEventCheck(Gimbal_Sentry_State_TypeDef state,
+                                    float pitch_target_deg,
+                                    float yaw_target_deg);
+    void ResetAnglePidDynamicState(Class_PID *pid,
+                                   float target_now,
+                                   float output_now);
+};
+extern Class_Gimbal_Sentry_Control Gimbal_Sentry_Control_Object;
+#endif
 
 #endif /* __GIMBAL_SENTRY_CONTROL_H__ */

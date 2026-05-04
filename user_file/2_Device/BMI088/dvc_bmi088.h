@@ -1,4 +1,10 @@
-﻿#ifndef __BMI088_H__
+/**
+ * @file dvc_bmi088.h
+ * @brief BMI088 设备驱动接口与管理对象定义。
+ * @details
+ * 本文件定义 BMI088 姿态解算所需的 `Class_BMI088` 管理对象。
+ */
+#ifndef __BMI088_H__
 #define __BMI088_H__
 
 #include "drv_spi.h"
@@ -7,12 +13,37 @@
 #include "cmsis_os.h"
 #include <stdint.h>
 
-HAL_StatusTypeDef BMI088_Init(SPI_HandleTypeDef *hspi);
-void BMI088_ReadAccel(SPI_HandleTypeDef *hspi, imu_data_t *data);
-void BMI088_ReadGyro(SPI_HandleTypeDef *hspi, imu_data_t *data);
-void BMI088_ReadTemp(SPI_HandleTypeDef *hspi, imu_data_t *data);
-void BMI088_Yaw_Continuous_Reset(void);
-euler_t BMI088_Complementary_Filter(imu_data_t *data, float dt, float kp, float ki);
+
+#ifdef __cplusplus
+/**
+ * @class Class_BMI088
+ * @brief BMI088 设备管理对象。
+ * @details
+ * 负责 BMI088 初始化、三轴数据读取、温度读取以及姿态解算辅助状态维护。
+ */
+class Class_BMI088
+{
+public:
+    quat_t Quat;                     /**< 当前姿态四元数 */
+    uint8_t Yaw_Continuous_Inited;   /**< 偏航连续化是否已初始化 */
+    float Yaw_Zero_Raw_Deg;          /**< 连续化零点对应的原始偏航角 */
+    float Yaw_Last_Rel_Wrapped_Deg;  /**< 上一周期相对零点的包角偏航角 */
+    float Yaw_Continuous_Deg;        /**< 当前连续偏航角 */
+
+    HAL_StatusTypeDef Init(SPI_HandleTypeDef *hspi);
+    void ReadAccel(SPI_HandleTypeDef *hspi, imu_data_t *data);
+    void ReadGyro(SPI_HandleTypeDef *hspi, imu_data_t *data);
+    void ReadTemp(SPI_HandleTypeDef *hspi, imu_data_t *data);
+    void YawContinuousReset();
+    euler_t ComplementaryFilter(imu_data_t *data, float dt, float kp, float ki);
+
+private:
+    float Wrap180(float angle_deg) const;
+    float YawToContinuous(float raw_yaw_deg);
+    void MapSensorToBody(imu_data_t *imu);
+};
+extern Class_BMI088 BMI088_Manage_Object;
+#endif
 
 //数据处理
 #define BMI088_ACCEL_SENSITIVITY_24G 1365.0f
