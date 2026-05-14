@@ -459,7 +459,7 @@ void Class_Gimbal::MotorControlTask(void *params)
         yaw_target_deg = Gimbal_Sentry_Target_Object.GetYaw();
         pitch_feedback_deg = -Euler_Angle_To_Send.pitch;
         sentry_state = Gimbal_Sentry_Target_Object.GetState();
-
+        
         Motor_Protect_Pitch_Object.SetActive(sentry_state != GIMBAL_SENTRY_STATE_TRACK_ARMOR);
         pitch_target_deg = Motor_Protect_Pitch_Object.ApplyTarget(pitch_target_deg);
 
@@ -505,13 +505,14 @@ void Class_Gimbal::MotorControlTask(void *params)
 
         pitch_output = Clamp(pitch_output, -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT);
         yaw_output = Clamp(yaw_output, -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT);
-
+        // 处理电机保护输出，避免继承错误速度导致继续撞击。
         pitch_output = Motor_Protect_Pitch_Object.UpdateOutput(pitch_target_deg,
                                                                pitch_feedback_deg,
                                                                Motor_Pitch.RxData.Speed,
                                                                pitch_output,
                                                                Motor_Pitch.RxData.Torque,
                                                                GIMBAL_CTRL_PERIOD_TICK);
+        // 处理电机保护重置请求，当保护触发后目标被钳位到边界时，且当前反馈角度与目标角度误差较大时，重置角度环输出以避免继承错误速度导致继续撞击。
         if (Motor_Protect_Pitch_Object.TakeResetRequest(&pitch_protect_reset_target_deg) != 0u)
         {
             Gimbal_Sentry_Control_Object.ResetAnglePidDynamicState(&Motor_Pitch.PID[1],

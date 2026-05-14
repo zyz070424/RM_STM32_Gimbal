@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file Gimbal.h
  * @brief 云台模块接口与管理对象定义。
  * @details
@@ -77,7 +77,35 @@ private:
     void SendPitchYawCan(int16_t pitch_cmd, int16_t yaw_cmd);
 };
 extern Class_Gimbal Gimbal_Object;
+//测试读取代码，方便观测
+typedef struct
+{
+    //Yaw 
+    volatile float Yaw_Speed_Target;
+    volatile float Yaw_Speed_Feedback;
+    volatile float Yaw_Angle_Target;
+    volatile float Yaw_Angle_Feedback;
+    volatile float Yaw_Speed_Output;
+    //Pitch
+    volatile float Pitch_Speed_Target;
+    volatile float Pitch_Speed_Feedback;
+    volatile float Pitch_Angle_Target;
+    volatile float Pitch_Angle_Feedback;
+    volatile float Pitch_Speed_Output;
+} Debug_ViewTypeDef;
+
+// typedef enum 
+// {
+    
+// };
+// typedef struct
+// {
+    
+// }Debug_CtrlTypeDef;
+
 #endif
+
+
 
 #ifdef __cplusplus
 extern "C" {
