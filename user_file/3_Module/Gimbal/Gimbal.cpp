@@ -8,8 +8,8 @@
 
 #define GIMBAL_CTRL_PERIOD_TICK       1
 #define GIMBAL_CTRL_DT                0.001f
-#define GIMBAL_MAHONY_KP              0.5f
-#define GIMBAL_MAHONY_KI              0.001f
+#define GIMBAL_MAHONY_KP              1.0f
+#define GIMBAL_MAHONY_KI              0.003f
 
 // IMU 实际 dt 估计参数（优先 DWT，失败回退 HAL tick）
 #define GIMBAL_IMU_DT_DEFAULT_S       GIMBAL_CTRL_DT
@@ -193,9 +193,13 @@ void Class_Gimbal::ResetControlTargets()
 void Class_Gimbal::ResetImuOutput()
 {
     BMI088_Manage_Object.YawContinuousReset();
+    BMI088_Manage_Object.QuaternionEkfReset();
     Euler_Angle_To_Send.roll = 0.0f;
     Euler_Angle_To_Send.pitch = 0.0f;
     Euler_Angle_To_Send.yaw = 0.0f;
+    Euler_Angle_Ekf_To_Send.roll = 0.0f;
+    Euler_Angle_Ekf_To_Send.pitch = 0.0f;
+    Euler_Angle_Ekf_To_Send.yaw = 0.0f;
 }
 
 /**
@@ -229,6 +233,7 @@ void Class_Gimbal::HandleSpiAliveChange(uint8_t online)
     }
 
     BMI088_Manage_Object.YawContinuousReset();
+    BMI088_Manage_Object.QuaternionEkfReset();
 }
 
 /**
@@ -335,6 +340,7 @@ void Class_Gimbal::Init(void *params)
     Pitch_Test_Target_Deg = 0.0f;
     Imu_Data = {};
     Euler_Angle_To_Send = {};
+    Euler_Angle_Ekf_To_Send = {};
     Tx_Data = {};
 
     Manifold_Manage_Object.Init(&Tx_Data, 0xFE, 0xFF, Manifold_Sentry_Mode_ENABLE);
@@ -457,7 +463,7 @@ void Class_Gimbal::MotorControlTask(void *params)
 
         pitch_target_deg = Gimbal_Sentry_Target_Object.GetPitch();
         yaw_target_deg = Gimbal_Sentry_Target_Object.GetYaw();
-        pitch_feedback_deg = -Euler_Angle_To_Send.pitch;
+        pitch_feedback_deg = -Euler_Angle_Ekf_To_Send.pitch;
         sentry_state = Gimbal_Sentry_Target_Object.GetState();
         
         Motor_Protect_Pitch_Object.SetActive(sentry_state != GIMBAL_SENTRY_STATE_TRACK_ARMOR);
@@ -497,7 +503,7 @@ void Class_Gimbal::MotorControlTask(void *params)
                                                      GIMBAL_CTRL_DT);
 
         yaw_target_speed = Motor_Yaw.PidCalculateAngle(yaw_target_deg,
-                                                       Euler_Angle_To_Send.yaw,
+                                                       Euler_Angle_Ekf_To_Send.yaw,
                                                        GIMBAL_CTRL_DT);
         yaw_output = Motor_Yaw.PidCalculateSpeed(yaw_target_speed,
                                                  Motor_Yaw.RxData.Speed,
@@ -566,6 +572,7 @@ void Class_Gimbal::EulerTask(void *params)
 
     Imu_Timebase.Init(GIMBAL_IMU_DT_DEFAULT_S);
     BMI088_Manage_Object.YawContinuousReset();
+    BMI088_Manage_Object.QuaternionEkfReset();
 
 #if GIMBAL_IMU_DRDY_ENABLE
     Imu_Task_Handle = xTaskGetCurrentTaskHandle();
@@ -596,6 +603,8 @@ void Class_Gimbal::EulerTask(void *params)
                                                              GIMBAL_MAHONY_KP,
                                                              GIMBAL_MAHONY_KI);
         Euler_Angle_To_Send = euler_raw;
+        // 保留原 Mahony 主路径不变，同时并行计算一份 EKF 结果供联调与对比使用。
+        Euler_Angle_Ekf_To_Send = BMI088_Manage_Object.QuaternionEkfFilter(&Imu_Data, imu_dt);
     }
 }
 
@@ -614,7 +623,7 @@ void Class_Gimbal::ManifoldControlTask(void *params)
 
     while (1)
     {
-        Manifold_Manage_Object.SendData(&Tx_Data, Euler_Angle_To_Send);
+        Manifold_Manage_Object.SendData(&Tx_Data, Euler_Angle_Ekf_To_Send);
         vTaskDelayUntil(&time, 10);
     }
 }

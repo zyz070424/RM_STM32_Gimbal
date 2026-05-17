@@ -1,0 +1,84 @@
+/**
+ ******************************************************************************
+ * @file    alg_quaternion_ekf.h
+ * @author  Wang Hongxi
+ * @version V1.2.0
+ * @date    2022/3/8
+ * @brief   四元数 EKF 姿态解算接口
+ ******************************************************************************
+ */
+#ifndef __ALG_QUATERNION_EKF_H__
+#define __ALG_QUATERNION_EKF_H__
+
+#include "alg_kalman_filter.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+typedef struct
+{
+    uint8_t Initialized;
+    KalmanFilter_t IMU_QuaternionEKF;
+    uint8_t ConvergeFlag;
+    uint8_t StableFlag;
+    uint64_t ErrorCount;
+    uint64_t UpdateCount;
+
+    float q[4];
+    float GyroBias[3];
+
+    float Gyro[3];
+    float Accel[3];
+
+    float OrientationCosine[3];
+
+    float accLPFcoef;
+    float gyro_norm;
+    float accl_norm;
+    float AdaptiveGainScale;
+
+    float Roll;
+    float Pitch;
+    float Yaw;
+
+    float YawTotalAngle;
+
+    float Q1;
+    float Q2;
+    float R;
+
+    float dt;
+    mat ChiSquare;
+    float ChiSquare_Data[1];
+    float ChiSquareTestThreshold;
+    float lambda;
+
+    int16_t YawRoundCount;
+
+    float YawAngleLast;
+} QEKF_INS_t;
+
+extern QEKF_INS_t QEKF_INS;
+
+void IMU_QuaternionEKF_Init(float process_noise1,
+                            float process_noise2,
+                            float measure_noise,
+                            float lambda,
+                            float lpf);
+void IMU_QuaternionEKF_Reset(void);
+void IMU_QuaternionEKF_Update(float gx, float gy, float gz, float ax, float ay, float az, float dt);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __ALG_QUATERNION_EKF_H__ */

@@ -44,6 +44,7 @@ public:
     Class_Motor Motor_Yaw;                   /**< Yaw 轴电机对象 */
     imu_data_t Imu_Data;                     /**< 当前 IMU 原始与解算输入数据 */
     euler_t Euler_Angle_To_Send;             /**< 当前对外发布的欧拉角 */
+    euler_t Euler_Angle_Ekf_To_Send;         /**< 并行 EKF 路径输出的欧拉角 */
     Manifold_UART_Tx_Data Tx_Data;           /**< 发给视觉的姿态帧缓存 */
     TaskHandle_t Imu_Task_Handle;            /**< IMU 任务句柄 */
     Class_DWT_Timebase Imu_Timebase;         /**< IMU 周期估计时间基 */
@@ -94,14 +95,6 @@ typedef struct
     volatile float Pitch_Speed_Output;
 } Debug_ViewTypeDef;
 
-// typedef enum 
-// {
-    
-// };
-// typedef struct
-// {
-    
-// }Debug_CtrlTypeDef;
 
 #endif
 

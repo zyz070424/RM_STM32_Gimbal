@@ -56,6 +56,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/Matrix/alg_matrix.cpp
     user_file/1_middlewares/Algorthm/DWT/alg_dwt.cpp
     user_file/1_middlewares/Algorthm/Quaternion/alg_quaternion.cpp
+    user_file/1_middlewares/Algorthm/KalmanFilter/alg_arm_math_compat.c
+    user_file/1_middlewares/Algorthm/KalmanFilter/alg_kalman_filter.c
+    user_file/1_middlewares/Algorthm/QuaternionEKF/alg_quaternion_ekf.c
     user_file/2_Device/BMI088/dvc_bmi088.cpp
     user_file/2_Device/Motor/dvc_motor.cpp
     user_file/2_Device/Motor/dvc_motor_protect.cpp
@@ -80,6 +83,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/Matrix
     user_file/1_middlewares/Algorthm/DWT
     user_file/1_middlewares/Algorthm/Quaternion
+    user_file/1_middlewares/Algorthm/KalmanFilter
+    user_file/1_middlewares/Algorthm/QuaternionEKF
     user_file/2_Device/BMI088
     user_file/2_Device/Motor
     user_file/2_Device/DR16
@@ -104,6 +109,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
-
 
 

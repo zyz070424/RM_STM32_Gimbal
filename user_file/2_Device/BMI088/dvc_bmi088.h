@@ -9,6 +9,7 @@
 
 #include "drv_spi.h"
 #include "alg_quaternion.h"
+#include "alg_quaternion_ekf.h"
 #include "FreeRTOS.h"
 #include "cmsis_os.h"
 #include <stdint.h>
@@ -29,18 +30,40 @@ public:
     float Yaw_Zero_Raw_Deg;          /**< 连续化零点对应的原始偏航角 */
     float Yaw_Last_Rel_Wrapped_Deg;  /**< 上一周期相对零点的包角偏航角 */
     float Yaw_Continuous_Deg;        /**< 当前连续偏航角 */
+    uint8_t Mahony_Input_Calibrated;   /**< Mahony 主路径输入校准是否完成 */
+    uint16_t Mahony_Calibration_Count; /**< Mahony 主路径累计静止样本数 */
+    vec3_t Mahony_Gyro_Bias_Dps;       /**< Mahony 主路径陀螺零偏，单位 deg/s */
+    vec3_t Mahony_Gyro_Bias_Sum_Dps;   /**< Mahony 主路径校准期陀螺累加值 */
+    float Mahony_Accel_Scale;          /**< Mahony 主路径加速度模长修正系数 */
+    float Mahony_Accel_Norm_Sum_G;     /**< Mahony 主路径校准期加速度模长累加值 */
+    uint8_t Ekf_Input_Calibrated;    /**< 并行 EKF 输入校准是否完成 */
+    uint16_t Ekf_Calibration_Count;  /**< 并行 EKF 输入校准累计样本数 */
+    vec3_t Ekf_Gyro_Offset_Dps;      /**< 并行 EKF 使用的陀螺零偏，单位 deg/s */
+    vec3_t Ekf_Gyro_Offset_Sum_Dps;  /**< 并行 EKF 校准期陀螺零偏累加值 */
+    float Ekf_Accel_Scale;           /**< 并行 EKF 使用的加速度标尺 */
+    float Ekf_Accel_Norm_Sum_G;      /**< 并行 EKF 校准期加速度模长累加值 */
+    uint8_t Ekf_Has_Last_Calib_Sample; /**< 并行 EKF 校准是否已有上一帧样本 */
+    vec3_t Ekf_Last_Calib_Gyro_Dps;    /**< 并行 EKF 校准上一帧陀螺样本 */
+    float Ekf_Last_Calib_Acc_Norm_G;   /**< 并行 EKF 校准上一帧加速度模长 */
 
     HAL_StatusTypeDef Init(SPI_HandleTypeDef *hspi);
     void ReadAccel(SPI_HandleTypeDef *hspi, imu_data_t *data);
     void ReadGyro(SPI_HandleTypeDef *hspi, imu_data_t *data);
     void ReadTemp(SPI_HandleTypeDef *hspi, imu_data_t *data);
     void YawContinuousReset();
+    void QuaternionEkfReset();
     euler_t ComplementaryFilter(imu_data_t *data, float dt, float kp, float ki);
+    euler_t QuaternionEkfFilter(imu_data_t *data, float dt);
 
 private:
     float Wrap180(float angle_deg) const;
     float YawToContinuous(float raw_yaw_deg);
     void MapSensorToBody(imu_data_t *imu);
+    void MahonyInputReset();
+    uint8_t MahonySampleIsStable(const imu_data_t *imu, float *acc_norm_g) const;
+    void MahonyInputUpdate(const imu_data_t *imu);
+    void QuaternionEkfInputReset();
+    void QuaternionEkfInputUpdate(const imu_data_t *imu);
 };
 extern Class_BMI088 BMI088_Manage_Object;
 #endif
@@ -104,11 +127,16 @@ extern Class_BMI088 BMI088_Manage_Object;
 #define BMI088_ACCEL_BWP_CIC        0xB0
 
 #define BMI088_ACCEL_CONF_1600HZ_NORMAL  (BMI088_ACCEL_ODR_1600_HZ | BMI088_ACCEL_BWP_NORMAL)
+#define BMI088_ACCEL_CONF_800HZ_NORMAL   (BMI088_ACCEL_ODR_800_HZ | BMI088_ACCEL_BWP_NORMAL)
+#define BMI088_ACCEL_CONF_400HZ_NORMAL   (BMI088_ACCEL_ODR_400_HZ | BMI088_ACCEL_BWP_NORMAL)
+#define BMI088_ACCEL_CONF_200HZ_NORMAL   (BMI088_ACCEL_ODR_200_HZ | BMI088_ACCEL_BWP_NORMAL)
+#define BMI088_ACCEL_CONF_100HZ_NORMAL   (BMI088_ACCEL_ODR_100_HZ | BMI088_ACCEL_BWP_NORMAL)
+#define BMI088_ACCEL_CONF_50HZ_NORMAL    (BMI088_ACCEL_ODR_50_HZ | BMI088_ACCEL_BWP_NORMAL)
 
 #define BMI088_ACCEL_RANGE_3G       0x00
 #define BMI088_ACCEL_RANGE_6G       0x01
 #define BMI088_ACCEL_RANGE_12G      0x02
-#define BMI088_ACCEL_RANGE_24G      0x03
+#define BMI088_ACCEL_RANGE_24G      0x03   
 
 #define BMI088_ACCEL_PWR_ENABLE     0x04
 #define BMI088_ACCEL_PWR_DISABLE    0x00
