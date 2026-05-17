@@ -59,6 +59,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/KalmanFilter/alg_arm_math_compat.c
     user_file/1_middlewares/Algorthm/KalmanFilter/alg_kalman_filter.c
     user_file/1_middlewares/Algorthm/QuaternionEKF/alg_quaternion_ekf.c
+    user_file/1_middlewares/Algorthm/CommonMath/common_math.cpp
     user_file/2_Device/BMI088/dvc_bmi088.cpp
     user_file/2_Device/Motor/dvc_motor.cpp
     user_file/2_Device/Motor/dvc_motor_protect.cpp
@@ -67,6 +68,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/3_Module/Sentry/gimbal_sentry_control.cpp
     user_file/3_Module/Sentry/gimbal_sentry.cpp
     user_file/3_Module/Sentry/gimbal_sentry_target.cpp
+    user_file/3_Module/Gimbal/gimbal_controller.cpp
+    user_file/3_Module/Gimbal/gimbal_debug.cpp
+    user_file/3_Module/Gimbal/gimbal_fault.cpp
+    user_file/3_Module/Gimbal/gimbal_status.cpp
     user_file/3_Module/Gimbal/Gimbal.cpp
     user_file/4_Task/MyTask.cpp
 )
@@ -85,6 +90,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     user_file/1_middlewares/Algorthm/Quaternion
     user_file/1_middlewares/Algorthm/KalmanFilter
     user_file/1_middlewares/Algorthm/QuaternionEKF
+    user_file/1_middlewares/Algorthm/CommonMath
     user_file/2_Device/BMI088
     user_file/2_Device/Motor
     user_file/2_Device/DR16
@@ -109,5 +115,3 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
-
-

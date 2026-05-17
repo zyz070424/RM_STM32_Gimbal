@@ -1,6 +1,10 @@
 #include "Gimbal.h"
 #include "gimbal_sentry_target.h"
 #include "gimbal_sentry_control.h"
+#include "gimbal_controller.h"
+#include "gimbal_debug.h"
+#include "gimbal_status.h"
+#include "gimbal_fault.h"
 #include "dvc_motor_protect.h"
 #include "alg_pid.h"
 #include <stdbool.h>
@@ -118,162 +122,6 @@ static const Gimbal_Sentry_Control_Config_TypeDef g_gimbal_sentry_control_config
 Class_Gimbal Gimbal_Object = {};
 
 /**
- * @brief 对输入角度做上下限钳位。
- * @param value 输入角度值，单位 deg。
- * @param min_value 最小允许角度，单位 deg。
- * @param max_value 最大允许角度，单位 deg。
- * @return 限幅后的角度值。
- */
-float Class_Gimbal::Clamp(float value, float min_value, float max_value)
-{
-    if (value < min_value)
-    {
-        return min_value;
-    }
-
-    if (value > max_value)
-    {
-        return max_value;
-    }
-
-    return value;
-}
-
-/**
- * @brief 选择角度环重置后的输出整形初值。
- * @param pid 需要读取旧输出状态的角度环 PID 对象。
- * @param target_deg 当前目标角度，单位 deg。
- * @param feedback_deg 当前反馈角度，单位 deg。
- * @param error_deadband_deg 误差死区阈值，单位 deg。
- * @param output_limit 角度环输出限幅。
- * @return 保留旧输出方向时返回旧输出，否则返回 0。
- * @note 旧输出方向仍朝向新目标时保留，否则清零，避免换向时继承错误速度。
- */
-float Class_Gimbal::SelectAngleResetOutput(const Class_PID *pid,
-                                           float target_deg,
-                                           float feedback_deg,
-                                           float error_deadband_deg,
-                                           float output_limit)
-{
-    float old_output;
-    float new_error;
-    float limit_abs;
-
-    if (pid == NULL)
-    {
-        return 0.0f;
-    }
-
-    limit_abs = fabsf(output_limit);
-    old_output = Clamp(pid->output, -limit_abs, limit_abs);
-    new_error = target_deg - feedback_deg;
-
-    if ((fabsf(new_error) <= fabsf(error_deadband_deg)) ||
-        ((old_output * new_error) <= 0.0f))
-    {
-        return 0.0f;
-    }
-
-    return old_output;
-}
-
-/**
- * @brief 复位当前控制目标。
- * @return 无。
- */
-void Class_Gimbal::ResetControlTargets()
-{
-    Gimbal_Sentry_Target_Object.ClearOutput();
-}
-
-/**
- * @brief 清空 IMU 对外输出。
- * @return 无。
- */
-void Class_Gimbal::ResetImuOutput()
-{
-    BMI088_Manage_Object.YawContinuousReset();
-    BMI088_Manage_Object.QuaternionEkfReset();
-    Euler_Angle_To_Send.roll = 0.0f;
-    Euler_Angle_To_Send.pitch = 0.0f;
-    Euler_Angle_To_Send.yaw = 0.0f;
-    Euler_Angle_Ekf_To_Send.roll = 0.0f;
-    Euler_Angle_Ekf_To_Send.pitch = 0.0f;
-    Euler_Angle_Ekf_To_Send.yaw = 0.0f;
-}
-
-/**
- * @brief 处理 CAN 在线状态变化。
- * @param online 0 表示离线，1 表示在线。
- * @return 无。
- */
-void Class_Gimbal::HandleCanAliveChange(uint8_t online)
-{
-    if (online != 0u)
-    {
-        return;
-    }
-
-    Motor_Pitch.ClearRuntime();
-    Motor_Yaw.ClearRuntime();
-    ResetControlTargets();
-}
-
-/**
- * @brief 处理 SPI 在线状态变化。
- * @param online 0 表示离线，1 表示在线。
- * @return 无。
- */
-void Class_Gimbal::HandleSpiAliveChange(uint8_t online)
-{
-    if (online == 0u)
-    {
-        ResetImuOutput();
-        return;
-    }
-
-    BMI088_Manage_Object.YawContinuousReset();
-    BMI088_Manage_Object.QuaternionEkfReset();
-}
-
-/**
- * @brief 处理 USB 在线状态变化。
- * @param online 0 表示离线，1 表示在线。
- * @return 无。
- * @note USB 离线时同时清空协议层目标和上层有效目标缓存，避免恢复在线后沿用旧目标。
- */
-void Class_Gimbal::HandleUsbAliveChange(uint8_t online)
-{
-    if (online != 0u)
-    {
-        return;
-    }
-
-    Manifold_Manage_Object.ClearTarget();
-    Gimbal_Sentry_Target_Object.ResetVision();
-}
-
-/**
- * @brief 将浮点输出转换为 16 位 CAN 控制量。
- * @param value 输入浮点控制量。
- * @return 限幅后的 16 位有符号整数。
- */
-int16_t Class_Gimbal::FloatToInt16Sat(float value)
-{
-    if (value > 32767.0f)
-    {
-        return 32767;
-    }
-
-    if (value < -32768.0f)
-    {
-        return -32768;
-    }
-
-    return (int16_t)value;
-}
-
-/**
  * @brief 把任意输出映射为离线时的零命令。
  * @param value 任意输入值。
  * @return 固定返回 0。
@@ -338,12 +186,20 @@ void Class_Gimbal::Init(void *params)
     Imu_Last_Dt_From_Dwt = 0u;
     Yaw_Test_Target_Deg = 0.0f;
     Pitch_Test_Target_Deg = 0.0f;
+    Pitch_Current_Target_Deg = 0.0f;
+    Pitch_Current_Target_Speed = 0.0f;
+    Pitch_Current_Output = 0.0f;
+    Yaw_Current_Target_Deg = 0.0f;
+    Yaw_Current_Target_Speed = 0.0f;
+    Yaw_Current_Output = 0.0f;
     Imu_Data = {};
     Euler_Angle_To_Send = {};
     Euler_Angle_Ekf_To_Send = {};
     Tx_Data = {};
 
     Manifold_Manage_Object.Init(&Tx_Data, 0xFE, 0xFF, Manifold_Sentry_Mode_ENABLE);
+    Gimbal_Controller_Object.Init();
+    Gimbal_Fault_Object.Init();
 
     CAN2_Manage_Object.Init(&hcan2);
     CAN2_Manage_Object.Start();
@@ -406,6 +262,8 @@ void Class_Gimbal::Init(void *params)
                                                  GIMBAL_SENTRY_STATE_SCAN);
 
     Gimbal_Sentry_Target_Object.Init(&g_gimbal_sentry_target_config);
+    Gimbal_Status_Object.Init();
+    Gimbal_Debug_Init(this);
 }
 
 /**
@@ -420,17 +278,6 @@ void Class_Gimbal::MotorControlTask(void *params)
     TickType_t now_tick;
     uint8_t can_online;
     uint8_t yaw_feedback_ready;
-    float pitch_output;
-    float pitch_feedback_deg;
-    float pitch_target_deg;
-    float pitch_reset_output;
-    float pitch_protect_reset_target_deg;
-    float pitch_target_speed;
-    float yaw_output;
-    float yaw_target_deg;
-    float yaw_reset_output;
-    float yaw_target_speed;
-    Gimbal_Sentry_State_TypeDef sentry_state;
     int16_t pitch_can_cmd;
     int16_t yaw_can_cmd;
 
@@ -439,96 +286,53 @@ void Class_Gimbal::MotorControlTask(void *params)
     time = xTaskGetTickCount();
 
     Gimbal_Sentry_Target_Object.ResetMode();
-
-    pitch_output = 0.0f;
-    yaw_output = 0.0f;
     while (1)
     {
         Motor_Pitch.CanDataReceive();
         Motor_Yaw.CanDataReceive();
+        now_tick = xTaskGetTickCount();
+        Gimbal_Debug_HandleCmd(this);
+        Gimbal_Debug_UpdateVisionView(now_tick);
 
         yaw_feedback_ready = (Motor_Yaw.RxData.Encoder_Initialized != 0u);
+        
         if (yaw_feedback_ready == 0u)
         {
             can_online = CAN2_Manage_Object.AliveIsOnline();
+            Gimbal_Debug_UpdateCommView(this);
+            Gimbal_Controller_Object.Pitch_Target_Deg = 0.0f;
+            Gimbal_Controller_Object.Pitch_Target_Speed = 0.0f;
+            Gimbal_Controller_Object.Pitch_Output = 0.0f;
+
+            Gimbal_Controller_Object.Yaw_Target_Deg = 0.0f;
+            Gimbal_Controller_Object.Yaw_Target_Speed = 0.0f;
+            Gimbal_Controller_Object.Yaw_Output = 0.0f;
+
+            Pitch_Current_Target_Deg = 0.0f;
+            Pitch_Current_Target_Speed = 0.0f;
+            Pitch_Current_Output = 0.0f;
+
+            Yaw_Current_Target_Deg = 0.0f;
+            Yaw_Current_Target_Speed = 0.0f;
+            Yaw_Current_Output = 0.0f;
+
+            Gimbal_Debug_UpdateMotorView(this);
+
             pitch_can_cmd = (can_online != 0u) ? OutputToCanNormal(0.0f) : OutputToCanZero(0.0f);
             yaw_can_cmd = (can_online != 0u) ? OutputToCanNormal(0.0f) : OutputToCanZero(0.0f);
+            Gimbal_Controller_Object.Pitch_Can_Cmd = pitch_can_cmd;
+            Gimbal_Controller_Object.Yaw_Can_Cmd = yaw_can_cmd;
             SendPitchYawCan(pitch_can_cmd, yaw_can_cmd);
             vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
             continue;
         }
 
-        now_tick = xTaskGetTickCount();
-        Gimbal_Sentry_Target_Object.Update(now_tick);
-
-        pitch_target_deg = Gimbal_Sentry_Target_Object.GetPitch();
-        yaw_target_deg = Gimbal_Sentry_Target_Object.GetYaw();
-        pitch_feedback_deg = -Euler_Angle_Ekf_To_Send.pitch;
-        sentry_state = Gimbal_Sentry_Target_Object.GetState();
-        
-        Motor_Protect_Pitch_Object.SetActive(sentry_state != GIMBAL_SENTRY_STATE_TRACK_ARMOR);
-        pitch_target_deg = Motor_Protect_Pitch_Object.ApplyTarget(pitch_target_deg);
-
-        Gimbal_Sentry_Control_Object.ApplyModeParams(&Motor_Pitch,
-                                                     &Motor_Yaw,
-                                                     sentry_state);
-        if (Gimbal_Sentry_Control_Object.AnglePidResetEventCheck(sentry_state,
-                                                                 pitch_target_deg,
-                                                                 yaw_target_deg) != 0u)
-        {
-            Motor_Protect_Pitch_Object.Blank();
-            pitch_reset_output = SelectAngleResetOutput(&Motor_Pitch.PID[1],
-                                                        pitch_target_deg,
-                                                        pitch_feedback_deg,
-                                                        GIMBAL_PITCH_ANGLE_DEADBAND_DEG,
-                                                        GIMBAL_PITCH_ANGLE_OUT_LIMIT);
-            yaw_reset_output = SelectAngleResetOutput(&Motor_Yaw.PID[1],
-                                                      yaw_target_deg,
-                                                      Euler_Angle_To_Send.yaw,
-                                                      GIMBAL_YAW_ANGLE_DEADBAND_DEG,
-                                                      GIMBAL_YAW_ANGLE_OUT_LIMIT);
-            Gimbal_Sentry_Control_Object.ResetAnglePidDynamicState(&Motor_Pitch.PID[1],
-                                                                   pitch_target_deg,
-                                                                   pitch_reset_output);
-            Gimbal_Sentry_Control_Object.ResetAnglePidDynamicState(&Motor_Yaw.PID[1],
-                                                                   yaw_target_deg,
-                                                                   yaw_reset_output);
-        }
-
-        pitch_target_speed = Motor_Pitch.PidCalculateAngle(pitch_target_deg,
-                                                           pitch_feedback_deg,
-                                                           GIMBAL_CTRL_DT);
-        pitch_output = Motor_Pitch.PidCalculateSpeed(pitch_target_speed,
-                                                     Motor_Pitch.RxData.Speed,
-                                                     GIMBAL_CTRL_DT);
-
-        yaw_target_speed = Motor_Yaw.PidCalculateAngle(yaw_target_deg,
-                                                       Euler_Angle_Ekf_To_Send.yaw,
-                                                       GIMBAL_CTRL_DT);
-        yaw_output = Motor_Yaw.PidCalculateSpeed(yaw_target_speed,
-                                                 Motor_Yaw.RxData.Speed,
-                                                 GIMBAL_CTRL_DT);
-
-        pitch_output = Clamp(pitch_output, -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT);
-        yaw_output = Clamp(yaw_output, -GIMBAL_MOTOR_CMD_LIMIT, GIMBAL_MOTOR_CMD_LIMIT);
-        // 处理电机保护输出，避免继承错误速度导致继续撞击。
-        pitch_output = Motor_Protect_Pitch_Object.UpdateOutput(pitch_target_deg,
-                                                               pitch_feedback_deg,
-                                                               Motor_Pitch.RxData.Speed,
-                                                               pitch_output,
-                                                               Motor_Pitch.RxData.Torque,
-                                                               GIMBAL_CTRL_PERIOD_TICK);
-        // 处理电机保护重置请求，当保护触发后目标被钳位到边界时，且当前反馈角度与目标角度误差较大时，重置角度环输出以避免继承错误速度导致继续撞击。
-        if (Motor_Protect_Pitch_Object.TakeResetRequest(&pitch_protect_reset_target_deg) != 0u)
-        {
-            Gimbal_Sentry_Control_Object.ResetAnglePidDynamicState(&Motor_Pitch.PID[1],
-                                                                   pitch_protect_reset_target_deg,
-                                                                   0.0f);
-        }
-
-        can_online = CAN2_Manage_Object.AliveIsOnline();
-        pitch_can_cmd = (can_online != 0u) ? OutputToCanNormal(pitch_output) : OutputToCanZero(pitch_output);
-        yaw_can_cmd = (can_online != 0u) ? OutputToCanNormal(yaw_output) : OutputToCanZero(yaw_output);
+        Gimbal_Controller_Object.Update(this, now_tick);
+        Gimbal_Debug_UpdateVisionView(now_tick);
+        Gimbal_Debug_UpdateCommView(this);
+        Gimbal_Debug_UpdateMotorView(this);
+        pitch_can_cmd = Gimbal_Controller_Object.Pitch_Can_Cmd;
+        yaw_can_cmd = Gimbal_Controller_Object.Yaw_Can_Cmd;
         SendPitchYawCan(pitch_can_cmd, yaw_can_cmd);
         vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
     }
@@ -636,10 +440,6 @@ void Class_Gimbal::ManifoldControlTask(void *params)
 void Class_Gimbal::TaskLoop(void *params)
 {
     TickType_t time;
-    uint16_t alive_check_div = 0u;
-    uint8_t can_online_changed;
-    uint8_t spi_online_changed;
-    uint8_t usb_online_changed;
 
     (void)params;
 
@@ -647,29 +447,9 @@ void Class_Gimbal::TaskLoop(void *params)
 
     while (1)
     {
-        if (++alive_check_div >= 100u)
-        {
-            alive_check_div = 0u;
-            CAN2_Manage_Object.AliveCheck100ms();
-            SPI1_Manage_Object.AliveCheck100ms();
-            USB_Manage_Object.AliveCheck100ms();
-        }
-
-        if (CAN2_Manage_Object.AliveTryConsumeChanged(&can_online_changed) != 0u)
-        {
-            HandleCanAliveChange(can_online_changed);
-        }
-
-        if (SPI1_Manage_Object.AliveTryConsumeChanged(&spi_online_changed) != 0u)
-        {
-            HandleSpiAliveChange(spi_online_changed);
-        }
-
-        if (USB_Manage_Object.AliveTryConsumeChanged(&usb_online_changed) != 0u)
-        {
-            HandleUsbAliveChange(usb_online_changed);
-        }
-
+        Gimbal_Status_Object.TaskUpdate(this,
+                                        &Gimbal_Fault_Object,
+                                        (uint32_t)xTaskGetTickCount());
         vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
     }
 }

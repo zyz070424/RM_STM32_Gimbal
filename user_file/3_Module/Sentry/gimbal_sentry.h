@@ -8,6 +8,7 @@
 #ifndef __GIMBAL_SENTRY_H__
 #define __GIMBAL_SENTRY_H__
 
+#include "common_math.h"
 #include <stdint.h>
 
 /**

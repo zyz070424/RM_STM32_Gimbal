@@ -6,6 +6,7 @@
  */
 #include "dvc_motor_protect.h"
 
+#include "common_math.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -30,28 +31,6 @@ uint16_t Motor_Protect_Sat_Add_U16(uint16_t value, uint16_t delta)
     }
 
     return (uint16_t)sum;
-}
-
-/**
- * @brief 对浮点数执行区间限幅。
- * @param value 输入值。
- * @param min_value 最小允许值。
- * @param max_value 最大允许值。
- * @return 限幅后的结果。
- */
-float Motor_Protect_Clamp(float value, float min_value, float max_value)
-{
-    if (value < min_value)
-    {
-        return min_value;
-    }
-
-    if (value > max_value)
-    {
-        return max_value;
-    }
-
-    return value;
 }
 
 /**
@@ -313,7 +292,7 @@ float Class_Motor_Protect::ApplyOutput(const Motor_Protect_Config_TypeDef *confi
         {
             return 0.0f;
         }
-        return Motor_Protect_Clamp(raw_cmd, -limit, limit);
+        return Clamp(raw_cmd, -limit, limit);
 
     case MOTOR_PROTECT_STATE_COOLDOWN:
     case MOTOR_PROTECT_STATE_FAULT:
@@ -636,5 +615,5 @@ float Class_Motor_Protect_Pitch::MakeBackoffTarget(float feedback_deg, float raw
                                  -Motor_Protect_Pitch_Backoff_Deg);
     }
 
-    return Motor_Protect_Clamp(target, min_angle_deg, max_angle_deg);
+    return Clamp(target, min_angle_deg, max_angle_deg);
 }

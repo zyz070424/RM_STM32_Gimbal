@@ -57,11 +57,6 @@ public:
     Gimbal_Sentry_State_TypeDef GetState() const;
 
 private:
-    float Clamp(float value, float min_value, float max_value) const;
-    float FirstOrderLowPass(float current_value,
-                            float target_value,
-                            float tau_s,
-                            float dt_s) const;
     void UpdateCache(TickType_t now_tick);
     uint8_t IsAvailable(TickType_t now_tick);
     void UpdateFilter(uint8_t target_available);

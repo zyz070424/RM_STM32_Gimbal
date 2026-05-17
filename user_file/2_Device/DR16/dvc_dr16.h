@@ -110,7 +110,6 @@ public:
     void RxCallback(uint8_t *data, uint16_t len);
 
 private:
-    float Clamp(float val, float min_val, float max_val) const;
     uint8_t SanitizeSwitch(uint8_t sw) const;
     uint8_t FetchLatestFrame(uint8_t *out_frame);
     void JudgeSwitch(DR16_Switch_Status_TypeDef *sw, uint8_t now, uint8_t prev);

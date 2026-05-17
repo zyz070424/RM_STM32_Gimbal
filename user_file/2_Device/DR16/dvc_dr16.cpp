@@ -6,6 +6,7 @@
  */
 #include "dvc_dr16.h"
 
+#include "common_math.h"
 #include <string.h>
 
 Class_DR16 DR16_Manage_Object = {};
@@ -53,28 +54,6 @@ void DR16_Receive_Callback_Bridge(uint8_t *data, uint16_t len)
 {
     DR16_Manage_Object.RxCallback(data, len);
 }
-}
-
-/**
- * @brief 对归一化结果做限幅。
- * @param val 输入值。
- * @param min_val 最小允许值。
- * @param max_val 最大允许值。
- * @return 限幅后的结果。
- */
-float Class_DR16::Clamp(float val, float min_val, float max_val) const
-{
-    if (val < min_val)
-    {
-        return min_val;
-    }
-
-    if (val > max_val)
-    {
-        return max_val;
-    }
-
-    return val;
 }
 
 /**

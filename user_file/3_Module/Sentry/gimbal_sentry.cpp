@@ -14,50 +14,6 @@ namespace
 constexpr float GimbalSentryTwoPi = 6.283185307f;
 
 /**
- * @brief 限幅输入值。
- * @param value 待限幅的值。
- * @param min_value 允许的最小值。
- * @param max_value 允许的最大值。
- * @return 限幅后的值。
- */
-float Gimbal_Sentry_Clamp(float value, float min_value, float max_value)
-{
-    if (value < min_value)
-    {
-        return min_value;
-    }
-
-    if (value > max_value)
-    {
-        return max_value;
-    }
-
-    return value;
-}
-
-/**
- * @brief 以固定最大步长逼近目标值。
- * @param current 当前值。
- * @param target 目标值。
- * @param max_step 单次允许的最大变化量。
- * @return 逼近后的结果。
- */
-float Gimbal_Sentry_Move_Towards(float current, float target, float max_step)
-{
-    if (target > current + max_step)
-    {
-        return current + max_step;
-    }
-
-    if (target < current - max_step)
-    {
-        return current - max_step;
-    }
-
-    return target;
-}
-
-/**
  * @brief 将相位约束到 `[0, 2pi)` 区间。
  * @param phase_rad 原始相位，单位：rad。
  * @return 包装后的相位，单位：rad。
@@ -171,11 +127,11 @@ void Class_Gimbal_Sentry::Update(const Gimbal_Sentry_Config_TypeDef *config,
     scan_pitch_phase_rad = Gimbal_Sentry_Scan_Phase_Step(scan_pitch_phase_rad,
                                                          config->scan_pitch_frequency_hz,
                                                          config->dt_s);
-    scan_yaw_target_deg = Gimbal_Sentry_Clamp(
+    scan_yaw_target_deg = Clamp(
         Gimbal_Sentry_Scan_Target_Sine(config->scan_yaw_amplitude_deg, scan_yaw_phase_rad),
         config->yaw_min_deg,
         config->yaw_max_deg);
-    scan_pitch_target_deg = Gimbal_Sentry_Clamp(
+    scan_pitch_target_deg = Clamp(
         Gimbal_Sentry_Scan_Target_Sine(config->scan_pitch_amplitude_deg, scan_pitch_phase_rad),
         config->pitch_min_deg,
         config->pitch_max_deg);
@@ -188,12 +144,12 @@ void Class_Gimbal_Sentry::Update(const Gimbal_Sentry_Config_TypeDef *config,
         if (input->vision_target_available != 0u)
         {
             state = GIMBAL_SENTRY_STATE_TRACK_ARMOR;
-            pitch_target_deg = Gimbal_Sentry_Clamp(input->vision_pitch_deg,
-                                                   config->pitch_min_deg,
-                                                   config->pitch_max_deg);
-            yaw_target_deg = Gimbal_Sentry_Clamp(input->vision_yaw_deg,
-                                                 config->yaw_min_deg,
-                                                 config->yaw_max_deg);
+            pitch_target_deg = Clamp(input->vision_pitch_deg,
+                                     config->pitch_min_deg,
+                                     config->pitch_max_deg);
+            yaw_target_deg = Clamp(input->vision_yaw_deg,
+                                   config->yaw_min_deg,
+                                   config->yaw_max_deg);
         }
         else
         {
@@ -205,12 +161,12 @@ void Class_Gimbal_Sentry::Update(const Gimbal_Sentry_Config_TypeDef *config,
     case GIMBAL_SENTRY_STATE_TRACK_ARMOR:
         if (input->vision_target_available != 0u)
         {
-            pitch_target_deg = Gimbal_Sentry_Clamp(input->vision_pitch_deg,
-                                                   config->pitch_min_deg,
-                                                   config->pitch_max_deg);
-            yaw_target_deg = Gimbal_Sentry_Clamp(input->vision_yaw_deg,
-                                                 config->yaw_min_deg,
-                                                 config->yaw_max_deg);
+            pitch_target_deg = Clamp(input->vision_pitch_deg,
+                                     config->pitch_min_deg,
+                                     config->pitch_max_deg);
+            yaw_target_deg = Clamp(input->vision_yaw_deg,
+                                   config->yaw_min_deg,
+                                   config->yaw_max_deg);
         }
         else
         {
@@ -224,21 +180,21 @@ void Class_Gimbal_Sentry::Update(const Gimbal_Sentry_Config_TypeDef *config,
         if (input->vision_target_available != 0u)
         {
             state = GIMBAL_SENTRY_STATE_TRACK_ARMOR;
-            pitch_target_deg = Gimbal_Sentry_Clamp(input->vision_pitch_deg,
-                                                   config->pitch_min_deg,
-                                                   config->pitch_max_deg);
-            yaw_target_deg = Gimbal_Sentry_Clamp(input->vision_yaw_deg,
-                                                 config->yaw_min_deg,
-                                                 config->yaw_max_deg);
+            pitch_target_deg = Clamp(input->vision_pitch_deg,
+                                     config->pitch_min_deg,
+                                     config->pitch_max_deg);
+            yaw_target_deg = Clamp(input->vision_yaw_deg,
+                                   config->yaw_min_deg,
+                                   config->yaw_max_deg);
             break;
         }
 
-        pitch_target_deg = Gimbal_Sentry_Move_Towards(pitch_target_deg,
-                                                      scan_pitch_target_deg,
-                                                      return_step);
-        yaw_target_deg = Gimbal_Sentry_Move_Towards(yaw_target_deg,
-                                                    scan_yaw_target_deg,
-                                                    return_step);
+        pitch_target_deg = SlewLimit(scan_pitch_target_deg,
+                                     pitch_target_deg,
+                                     return_step);
+        yaw_target_deg = SlewLimit(scan_yaw_target_deg,
+                                   yaw_target_deg,
+                                   return_step);
 
         if ((fabsf(pitch_target_deg - scan_pitch_target_deg) <= config->lost_return_near_deg) &&
             (fabsf(yaw_target_deg - scan_yaw_target_deg) <= config->lost_return_near_deg))
@@ -254,12 +210,12 @@ void Class_Gimbal_Sentry::Update(const Gimbal_Sentry_Config_TypeDef *config,
         break;
     }
 
-    pitch_target_deg = Gimbal_Sentry_Clamp(pitch_target_deg,
-                                           config->pitch_min_deg,
-                                           config->pitch_max_deg);
-    yaw_target_deg = Gimbal_Sentry_Clamp(yaw_target_deg,
-                                         config->yaw_min_deg,
-                                         config->yaw_max_deg);
+    pitch_target_deg = Clamp(pitch_target_deg,
+                             config->pitch_min_deg,
+                             config->pitch_max_deg);
+    yaw_target_deg = Clamp(yaw_target_deg,
+                           config->yaw_min_deg,
+                           config->yaw_max_deg);
     Gimbal_Sentry_Fill_Output(this, output);
 }
 

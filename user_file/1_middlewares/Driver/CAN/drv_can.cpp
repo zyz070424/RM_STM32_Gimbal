@@ -440,6 +440,7 @@ uint8_t Class_CAN_Manage_Object::AliveTryConsumeChanged(uint8_t *online)
     if (changed != 0u)
     {
         Alive_Changed = 0u;
+        //这个是保护 online 指针不为空，避免段错误
         if (online != NULL)
         {
             *online = Alive_Online;

@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-#include "drv_usb.h"
 #include "dvc_motor.h"
 #include "dvc_manifold.h"
 #include "dvc_bmi088.h"
@@ -25,6 +24,8 @@
 #include "alg_pid.h"
 #include "gimbal_sentry.h"
 #include "alg_dwt.h"
+#include "gimbal_debug.h"
+#include "common_math.h"
 #include "portmacro.h"
 #include "stm32f4xx_hal.h"
 #include <math.h>
@@ -52,6 +53,12 @@ public:
     volatile uint8_t Imu_Last_Dt_From_Dwt;   /**< 最近一次 dt 是否来自 DWT */
     float Yaw_Test_Target_Deg;               /**< 调试用 Yaw 目标角 */
     float Pitch_Test_Target_Deg;             /**< 调试用 Pitch 目标角 */
+    float Pitch_Current_Target_Deg;          /**< 当前 pitch 角度目标缓存 */
+    float Pitch_Current_Target_Speed;        /**< 当前 pitch 速度目标缓存 */
+    float Pitch_Current_Output;              /**< 当前 pitch 输出缓存 */
+    float Yaw_Current_Target_Deg;            /**< 当前 yaw 角度目标缓存 */
+    float Yaw_Current_Target_Speed;          /**< 当前 yaw 速度目标缓存 */
+    float Yaw_Current_Output;                /**< 当前 yaw 输出缓存 */
 
     void Init(void *params);
     void EulerTask(void *params);
@@ -61,41 +68,11 @@ public:
     void ImuExtiCallback(uint16_t gpio_pin);
 
 private:
-    static float Clamp(float value, float min_value, float max_value);
-    static float SelectAngleResetOutput(const Class_PID *pid,
-                                        float target_deg,
-                                        float feedback_deg,
-                                        float error_deadband_deg,
-                                        float output_limit);
-    static int16_t FloatToInt16Sat(float value);
     static int16_t OutputToCanZero(float value);
     static int16_t OutputToCanNormal(float value);
-    void ResetControlTargets();
-    void ResetImuOutput();
-    void HandleCanAliveChange(uint8_t online);
-    void HandleSpiAliveChange(uint8_t online);
-    void HandleUsbAliveChange(uint8_t online);
     void SendPitchYawCan(int16_t pitch_cmd, int16_t yaw_cmd);
 };
 extern Class_Gimbal Gimbal_Object;
-//测试读取代码，方便观测
-typedef struct
-{
-    //Yaw 
-    volatile float Yaw_Speed_Target;
-    volatile float Yaw_Speed_Feedback;
-    volatile float Yaw_Angle_Target;
-    volatile float Yaw_Angle_Feedback;
-    volatile float Yaw_Speed_Output;
-    //Pitch
-    volatile float Pitch_Speed_Target;
-    volatile float Pitch_Speed_Feedback;
-    volatile float Pitch_Angle_Target;
-    volatile float Pitch_Angle_Feedback;
-    volatile float Pitch_Speed_Output;
-} Debug_ViewTypeDef;
-
-
 #endif
 
 
