@@ -114,4 +114,11 @@ int16_t FloatToInt16Sat(float value);
  */
 uint16_t FloatToUint16Sat(float value);
 
+/**
+ * @brief  输出值转换为零值。
+ * @param value 输入值。
+ * @return 零值。
+ */
+int16_t OutputToZero(float value);
+
 #endif /* __COMMON_MATH_H__ */

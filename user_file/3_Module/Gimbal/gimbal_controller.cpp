@@ -1,19 +1,19 @@
 #include "gimbal_controller.h"
 
 #include "Gimbal.h"
+#include "gimbal_status.h"
 #include "dvc_motor_protect.h"
 #include "gimbal_debug.h"
-#include "gimbal_fault.h"
 #include "gimbal_sentry_control.h"
 #include "gimbal_sentry_target.h"
 #include <math.h>
 
-#define GIMBAL_CONTROLLER_CTRL_DT                0.001f
-#define GIMBAL_CONTROLLER_PERIOD_TICK            1u
-#define GIMBAL_CONTROLLER_MOTOR_CMD_LIMIT        10000.0f
-#define GIMBAL_CONTROLLER_YAW_ANGLE_OUT_LIMIT    10.0f
-#define GIMBAL_CONTROLLER_YAW_ANGLE_DEADBAND_DEG 0.0f
-#define GIMBAL_CONTROLLER_PITCH_ANGLE_OUT_LIMIT  10.0f
+#define GIMBAL_CONTROLLER_CTRL_DT                  0.001f
+#define GIMBAL_CONTROLLER_PERIOD_TICK              1u
+#define GIMBAL_CONTROLLER_MOTOR_CMD_LIMIT          10000.0f
+#define GIMBAL_CONTROLLER_YAW_ANGLE_OUT_LIMIT      10.0f
+#define GIMBAL_CONTROLLER_YAW_ANGLE_DEADBAND_DEG   0.0f
+#define GIMBAL_CONTROLLER_PITCH_ANGLE_OUT_LIMIT    10.0f
 #define GIMBAL_CONTROLLER_PITCH_ANGLE_DEADBAND_DEG 0.4f
 
 /**
@@ -72,47 +72,27 @@ void Class_Gimbal_Controller::Init()
     Sentry_State = GIMBAL_SENTRY_STATE_SCAN;
 }
 
-/**
- * @brief 把任意输出映射为离线时的零命令。
- * @param value 任意输入值。
- * @return 固定返回 0。
- */
-int16_t Class_Gimbal_Controller::OutputToCanZero(float value)
-{
-    (void)value;
-    return 0;
-}
 
-/**
- * @brief 把浮点输出映射为在线时的 CAN 控制量。
- * @param value PID 浮点输出。
- * @return 转换后的 16 位控制量。
- */
-int16_t Class_Gimbal_Controller::OutputToCanNormal(float value)
-{
-    return FloatToInt16Sat(value);
-}
 
 /**
  * @brief 推进一拍云台最终控制裁决。
  * @param gimbal 云台主对象。
  * @param now_tick 当前系统 tick。
  * @return 无。
- * @details
- * 第一版骨架只保留调用顺序，不在本文件内真正搬运控制逻辑。
  */
 void Class_Gimbal_Controller::Update(Class_Gimbal *gimbal, uint32_t now_tick)
 {
+    (void)now_tick;
+
     if (gimbal == nullptr)
     {
         return;
     }
 
-    UpdateSentryTarget(now_tick);
     ApplyProtectAndMode(gimbal);
     HandleAnglePidReset(gimbal);
-    CalculateOutput(gimbal, now_tick);
-    BuildCanCmd(gimbal);
+    CalculateOutput(gimbal);
+    BuildCanCmd();
 
     gimbal->Pitch_Current_Target_Deg = Pitch_Target_Deg;
     gimbal->Pitch_Current_Target_Speed = Pitch_Target_Speed;
@@ -123,20 +103,7 @@ void Class_Gimbal_Controller::Update(Class_Gimbal *gimbal, uint32_t now_tick)
 }
 
 /**
- * @brief 更新 sentry 原始目标与状态缓存。
- * @param now_tick 当前系统 tick。
- * @return 无。
- */
-void Class_Gimbal_Controller::UpdateSentryTarget(uint32_t now_tick)
-{
-    Gimbal_Sentry_Target_Object.Update(now_tick);
-    Pitch_Target_Deg = Gimbal_Sentry_Target_Object.GetPitch();
-    Yaw_Target_Deg = Gimbal_Sentry_Target_Object.GetYaw();
-    Sentry_State = Gimbal_Sentry_Target_Object.GetState();
-}
-
-/**
- * @brief 处理保护开关与模式参数入口。
+ * @brief 处理最终目标、保护开关与模式参数入口。
  * @param gimbal 云台主对象。
  * @return 无。
  */
@@ -148,8 +115,12 @@ void Class_Gimbal_Controller::ApplyProtectAndMode(Class_Gimbal *gimbal)
     }
     else
     {
-        Motor_Protect_Pitch_Object.SetActive(Sentry_State != GIMBAL_SENTRY_STATE_TRACK_ARMOR);
+        Motor_Protect_Pitch_Object.SetActive(Gimbal_Sentry_Target_Object.GetState() != GIMBAL_SENTRY_STATE_TRACK_ARMOR);
     }
+
+    Pitch_Target_Deg = Gimbal_Sentry_Target_Object.GetPitch();
+    Yaw_Target_Deg = Gimbal_Sentry_Target_Object.GetYaw();
+    Sentry_State = Gimbal_Sentry_Target_Object.GetState();
 
     Pitch_Target_Deg = Motor_Protect_Pitch_Object.ApplyTarget(Pitch_Target_Deg);
     Gimbal_Sentry_Control_Object.ApplyModeParams(&gimbal->Motor_Pitch,
@@ -201,7 +172,7 @@ void Class_Gimbal_Controller::HandleAnglePidReset(Class_Gimbal *gimbal)
  * @param gimbal 云台主对象。
  * @return 无。
  */
-void Class_Gimbal_Controller::CalculateOutput(Class_Gimbal *gimbal, uint32_t now_tick)
+void Class_Gimbal_Controller::CalculateOutput(Class_Gimbal *gimbal)
 {
     float pitch_feedback_deg;
     float pitch_protect_reset_target_deg;
@@ -235,10 +206,6 @@ void Class_Gimbal_Controller::CalculateOutput(Class_Gimbal *gimbal, uint32_t now
                                                            Pitch_Output,
                                                            gimbal->Motor_Pitch.RxData.Torque,
                                                            GIMBAL_CONTROLLER_PERIOD_TICK);
-    Gimbal_Fault_Object.SyncBit(GIMBAL_FAULT_PITCH_PROTECT,
-                                Motor_Protect_Pitch_Object.IsFault(),
-                                0u,
-                                now_tick);
 
     if (Motor_Protect_Pitch_Object.TakeResetRequest(&pitch_protect_reset_target_deg) != 0u)
     {
@@ -250,18 +217,15 @@ void Class_Gimbal_Controller::CalculateOutput(Class_Gimbal *gimbal, uint32_t now
 
 /**
  * @brief 生成当前拍最终 CAN 控制量。
- * @param gimbal 云台主对象。
  * @return 无。
  */
-void Class_Gimbal_Controller::BuildCanCmd(Class_Gimbal *gimbal)
+void Class_Gimbal_Controller::BuildCanCmd()
 {
     uint8_t can_online;
 
-    (void)gimbal;
-
-    can_online = CAN2_Manage_Object.AliveIsOnline();
-    Pitch_Can_Cmd = (can_online != 0u) ? OutputToCanNormal(Pitch_Output)
-                                       : OutputToCanZero(Pitch_Output);
-    Yaw_Can_Cmd = (can_online != 0u) ? OutputToCanNormal(Yaw_Output)
-                                     : OutputToCanZero(Yaw_Output);
+    can_online = Gimbal_Status_Object.IsCanOnline();
+    Pitch_Can_Cmd = (can_online != 0u) ? FloatToInt16Sat(Pitch_Output)
+                                       : OutputToZero(Pitch_Output);
+    Yaw_Can_Cmd = (can_online != 0u) ? FloatToInt16Sat(Yaw_Output)
+                                     : OutputToZero(Yaw_Output);
 }

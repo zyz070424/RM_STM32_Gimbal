@@ -28,7 +28,7 @@ typedef struct
  * @class Class_Gimbal_Sentry_Target
  * @brief 哨兵目标生成管理对象。
  * @details
- * 负责维护视觉目标缓存与滤波状态，并在每个控制周期内调用底层状态机生成当前目标角。
+ * 负责维护视觉目标缓存与滤波状态，并根据当前哨兵状态生成当前目标角。
  */
 class Class_Gimbal_Sentry_Target
 {
@@ -36,6 +36,7 @@ public:
     Gimbal_Sentry_Target_Config_TypeDef config;  /**< 模块配置缓存 */
     uint8_t initialized;                         /**< 模块初始化完成标志 */
     Class_Gimbal_Sentry sentry_handle;           /**< 底层哨兵状态机实例 */
+    Gimbal_Sentry_State_TypeDef last_state;      /**< 上一拍哨兵状态缓存 */
     uint32_t visual_last_rx_frame_seq;           /**< 最近处理过的视觉帧序号 */
     TickType_t visual_last_valid_tick;           /**< 最近一次收到有效目标的时间戳 */
     float visual_last_valid_pitch_deg;           /**< 最近一次有效视觉 pitch，单位：deg */
@@ -44,6 +45,12 @@ public:
     float visual_filtered_yaw_deg;               /**< 视觉滤波后的 yaw，单位：deg */
     uint8_t visual_has_valid_target;             /**< 是否已经缓存过有效视觉目标 */
     uint8_t visual_filter_tracking;              /**< 视觉滤波器是否已进入跟踪状态 */
+    float scan_yaw_phase_rad;                    /**< yaw 扫描正弦相位，单位：rad */
+    float scan_pitch_phase_rad;                  /**< pitch 扫描正弦相位，单位：rad */
+    float scan_yaw_target_deg;                   /**< 当前扫描轨迹上的 yaw 目标角，单位：deg */
+    float scan_pitch_target_deg;                 /**< 当前扫描轨迹上的 pitch 目标角，单位：deg */
+    float raw_pitch_target;                      /**< sentry 内部 pitch 目标角，单位：deg */
+    float raw_yaw_target;                        /**< sentry 内部 yaw 目标角，单位：deg */
     float pitch_target;                          /**< 输出给云台的 pitch 目标角，单位：deg */
     float yaw_target;                            /**< 输出给云台的 yaw 目标角，单位：deg */
 

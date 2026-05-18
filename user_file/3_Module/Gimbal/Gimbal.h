@@ -70,7 +70,6 @@ public:
 private:
     static int16_t OutputToCanZero(float value);
     static int16_t OutputToCanNormal(float value);
-    void SendPitchYawCan(int16_t pitch_cmd, int16_t yaw_cmd);
 };
 extern Class_Gimbal Gimbal_Object;
 #endif

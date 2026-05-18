@@ -547,6 +547,59 @@ void Class_Motor::UpdateCanCache(int16_t data)
 }
 
 /**
+ * @brief 联合发送两个电机控制量，必要时自动合帧。
+ * @param motor_a 第一个电机对象。
+ * @param cmd_a 第一个电机控制量。
+ * @param motor_b 第二个电机对象。
+ * @param cmd_b 第二个电机控制量。
+ * @return 无。
+ * @details 当两个电机位于同一路 CAN 且共用同一发送帧 ID 时，
+ *          先分别写入同一帧缓存，再仅发送一次整帧；否则回退为逐电机发送。
+ */
+void Class_Motor::SendPair(Class_Motor *motor_a,
+                           int16_t cmd_a,
+                           Class_Motor *motor_b,
+                           int16_t cmd_b)
+{
+    uint32_t send_id_a;
+    uint32_t send_id_b;
+    uint8_t byte_index_a;
+    uint8_t byte_index_b;
+    uint8_t motor_a_valid;
+    uint8_t motor_b_valid;
+
+    motor_a_valid = ((motor_a != NULL) &&
+                     (motor_a->GetSendFrameInfo(&send_id_a, &byte_index_a) != 0u))
+                        ? 1u
+                        : 0u;
+    motor_b_valid = ((motor_b != NULL) &&
+                     (motor_b->GetSendFrameInfo(&send_id_b, &byte_index_b) != 0u))
+                        ? 1u
+                        : 0u;
+
+    if ((motor_a_valid != 0u) &&
+        (motor_b_valid != 0u) &&
+        (motor_a->can == motor_b->can) &&
+        (send_id_a == send_id_b))
+    {
+        motor_a->UpdateFrameData(send_id_a, byte_index_a, cmd_a);
+        motor_b->UpdateFrameData(send_id_b, byte_index_b, cmd_b);
+        SendCanFrameById(motor_a->can, send_id_a);
+        return;
+    }
+
+    if (motor_a_valid != 0u)
+    {
+        motor_a->UpdateFrameAndSend(send_id_a, byte_index_a, cmd_a);
+    }
+
+    if (motor_b_valid != 0u)
+    {
+        motor_b->UpdateFrameAndSend(send_id_b, byte_index_b, cmd_b);
+    }
+}
+
+/**
  * @brief 按控制帧 ID 发送对应缓存。
  * @param can CAN 句柄。
  * @param send_id 控制帧 ID。

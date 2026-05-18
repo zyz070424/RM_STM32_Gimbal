@@ -8,8 +8,40 @@
 
 #include "dvc_manifold.h"
 #include "drv_usb.h"
+#include <math.h>
 
 extern Manifold_UART_Rx_Data Rx_Data; /**< 视觉链路最新一帧接收缓存。 */
+
+namespace
+{
+constexpr float GimbalSentryTwoPi = 6.283185307f;
+
+float Gimbal_Sentry_Wrap_Phase(float phase_rad)
+{
+    while (phase_rad >= GimbalSentryTwoPi)
+    {
+        phase_rad -= GimbalSentryTwoPi;
+    }
+
+    while (phase_rad < 0.0f)
+    {
+        phase_rad += GimbalSentryTwoPi;
+    }
+
+    return phase_rad;
+}
+
+float Gimbal_Sentry_Scan_Phase_Step(float phase_rad, float frequency_hz, float dt_s)
+{
+    phase_rad += GimbalSentryTwoPi * frequency_hz * dt_s;
+    return Gimbal_Sentry_Wrap_Phase(phase_rad);
+}
+
+float Gimbal_Sentry_Scan_Target_Sine(float amplitude_deg, float phase_rad)
+{
+    return amplitude_deg * sinf(phase_rad);
+}
+}
 
 Class_Gimbal_Sentry_Target Gimbal_Sentry_Target_Object = {};
 
@@ -127,6 +159,13 @@ void Class_Gimbal_Sentry_Target::ResetMode()
     }
 
     sentry_handle.Reset();
+    last_state = GIMBAL_SENTRY_STATE_SCAN;
+    scan_yaw_phase_rad = 0.0f;
+    scan_pitch_phase_rad = 0.0f;
+    scan_yaw_target_deg = 0.0f;
+    scan_pitch_target_deg = 0.0f;
+    raw_pitch_target = 0.0f;
+    raw_yaw_target = 0.0f;
     ResetVision();
     ClearOutput();
 }
@@ -153,12 +192,14 @@ void Class_Gimbal_Sentry_Target::ResetVision()
  */
 void Class_Gimbal_Sentry_Target::ClearOutput()
 {
+    raw_pitch_target = 0.0f;
+    raw_yaw_target = 0.0f;
     pitch_target = 0.0f;
     yaw_target = 0.0f;
 }
 
 /**
- * @brief 结合视觉缓存与状态机更新当前拍目标角。
+ * @brief 结合视觉缓存、状态机和模式目标生成当前拍目标角。
  * @param now_tick 当前系统 tick。
  * @return 无。
  */
@@ -166,6 +207,8 @@ void Class_Gimbal_Sentry_Target::Update(TickType_t now_tick)
 {
     Gimbal_Sentry_Input_TypeDef sentry_input = {};
     Gimbal_Sentry_Output_TypeDef sentry_output = {};
+    Gimbal_Sentry_State_TypeDef state;
+    float return_step;
 
     if (initialized == 0u)
     {
@@ -177,9 +220,77 @@ void Class_Gimbal_Sentry_Target::Update(TickType_t now_tick)
     sentry_input.vision_pitch_deg = visual_filtered_pitch_deg;
     sentry_input.vision_yaw_deg = visual_filtered_yaw_deg;
 
+    scan_yaw_phase_rad = Gimbal_Sentry_Scan_Phase_Step(scan_yaw_phase_rad,
+                                                       config.sentry_config.scan_yaw_frequency_hz,
+                                                       config.sentry_config.dt_s);
+    scan_pitch_phase_rad = Gimbal_Sentry_Scan_Phase_Step(scan_pitch_phase_rad,
+                                                         config.sentry_config.scan_pitch_frequency_hz,
+                                                         config.sentry_config.dt_s);
+    scan_yaw_target_deg = Clamp(
+        Gimbal_Sentry_Scan_Target_Sine(config.sentry_config.scan_yaw_amplitude_deg, scan_yaw_phase_rad),
+        config.sentry_config.yaw_min_deg,
+        config.sentry_config.yaw_max_deg);
+    scan_pitch_target_deg = Clamp(
+        Gimbal_Sentry_Scan_Target_Sine(config.sentry_config.scan_pitch_amplitude_deg, scan_pitch_phase_rad),
+        config.sentry_config.pitch_min_deg,
+        config.sentry_config.pitch_max_deg);
+
+    sentry_input.lost_return_finished = 0u;
+    if (sentry_handle.GetState() == GIMBAL_SENTRY_STATE_LOST_TARGET_RETURN_SCAN)
+    {
+        if ((fabsf(raw_pitch_target - scan_pitch_target_deg) <= config.sentry_config.lost_return_near_deg) &&
+            (fabsf(raw_yaw_target - scan_yaw_target_deg) <= config.sentry_config.lost_return_near_deg))
+        {
+            sentry_input.lost_return_finished = 1u;
+        }
+    }
+
     sentry_handle.Update(&config.sentry_config, &sentry_input, &sentry_output);
-    pitch_target = -sentry_output.pitch_target_deg;
-    yaw_target = sentry_output.yaw_target_deg;
+    state = sentry_output.state;
+    return_step = config.sentry_config.lost_return_speed_deg_s * config.sentry_config.dt_s;
+
+    switch (state)
+    {
+    case GIMBAL_SENTRY_STATE_SCAN:
+        raw_pitch_target = scan_pitch_target_deg;
+        raw_yaw_target = scan_yaw_target_deg;
+        break;
+
+    case GIMBAL_SENTRY_STATE_TRACK_ARMOR:
+        raw_pitch_target = Clamp(visual_filtered_pitch_deg,
+                                 config.sentry_config.pitch_min_deg,
+                                 config.sentry_config.pitch_max_deg);
+        raw_yaw_target = Clamp(visual_filtered_yaw_deg,
+                               config.sentry_config.yaw_min_deg,
+                               config.sentry_config.yaw_max_deg);
+        break;
+
+    case GIMBAL_SENTRY_STATE_LOST_TARGET_RETURN_SCAN:
+        raw_pitch_target = SlewLimit(scan_pitch_target_deg,
+                                     raw_pitch_target,
+                                     return_step);
+        raw_yaw_target = SlewLimit(scan_yaw_target_deg,
+                                   raw_yaw_target,
+                                   return_step);
+        break;
+
+    default:
+        sentry_handle.Reset();
+        raw_pitch_target = scan_pitch_target_deg;
+        raw_yaw_target = scan_yaw_target_deg;
+        state = GIMBAL_SENTRY_STATE_SCAN;
+        break;
+    }
+
+    raw_pitch_target = Clamp(raw_pitch_target,
+                             config.sentry_config.pitch_min_deg,
+                             config.sentry_config.pitch_max_deg);
+    raw_yaw_target = Clamp(raw_yaw_target,
+                           config.sentry_config.yaw_min_deg,
+                           config.sentry_config.yaw_max_deg);
+    pitch_target = -raw_pitch_target;
+    yaw_target = raw_yaw_target;
+    last_state = state;
 }
 
 /**

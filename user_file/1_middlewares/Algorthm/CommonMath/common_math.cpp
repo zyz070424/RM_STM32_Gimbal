@@ -268,3 +268,13 @@ bool RangeCheck(float value, float min_value, float max_value)
 {
     return (value >= min_value) && (value <= max_value);
 }
+/**
+ * @brief  输出值转换为零值。
+ * @param value 输入值。
+ * @return 零值。
+ */
+int16_t OutputToZero(float value)
+{
+    (void)value;
+    return 0;
+}

@@ -91,6 +91,10 @@ public:
     uint32_t GetCanSendId() const;
     void UpdateCanCache(int16_t data);
     void SendCanData(int16_t data);
+    static void SendPair(Class_Motor *motor_a,
+                         int16_t cmd_a,
+                         Class_Motor *motor_b,
+                         int16_t cmd_b);
     static void SendCanFrameById(CAN_HandleTypeDef *can, uint32_t send_id);
 
 private:

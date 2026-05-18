@@ -35,13 +35,10 @@ public:
     void Update(Class_Gimbal *gimbal, uint32_t now_tick);
 
 private:
-    static int16_t OutputToCanZero(float value);
-    static int16_t OutputToCanNormal(float value);
-    void UpdateSentryTarget(uint32_t now_tick);
     void ApplyProtectAndMode(Class_Gimbal *gimbal);
     void HandleAnglePidReset(Class_Gimbal *gimbal);
-    void CalculateOutput(Class_Gimbal *gimbal, uint32_t now_tick);
-    void BuildCanCmd(Class_Gimbal *gimbal);
+    void CalculateOutput(Class_Gimbal *gimbal);
+    void BuildCanCmd();
 };
 
 extern Class_Gimbal_Controller Gimbal_Controller_Object;

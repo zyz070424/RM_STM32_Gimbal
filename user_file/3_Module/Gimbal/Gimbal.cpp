@@ -118,59 +118,9 @@ static const Gimbal_Sentry_Control_Config_TypeDef g_gimbal_sentry_control_config
     .target_reset_pitch_deg = GIMBAL_TARGET_RESET_PITCH_DEG,
     .target_reset_yaw_deg = GIMBAL_TARGET_RESET_YAW_DEG
 };
-
+//===============================================配置结束=====================================================
 Class_Gimbal Gimbal_Object = {};
 
-/**
- * @brief 把任意输出映射为离线时的零命令。
- * @param value 任意输入值。
- * @return 固定返回 0。
- */
-int16_t Class_Gimbal::OutputToCanZero(float value)
-{
-    (void)value;
-    return 0;
-}
-
-/**
- * @brief 把浮点输出映射为在线时的 CAN 控制量。
- * @param value PID 浮点输出。
- * @return 转换后的 16 位控制量。
- */
-int16_t Class_Gimbal::OutputToCanNormal(float value)
-{
-    return FloatToInt16Sat(value);
-}
-
-/**
- * @brief 合帧发送 Pitch 和 Yaw 电机控制量。
- * @param pitch_cmd Pitch 电机控制量。
- * @param yaw_cmd Yaw 电机控制量。
- * @return 无。
- * @details 当 Pitch 和 Yaw 位于同一路 CAN 且共用发送 ID 时，优先走合帧缓存发送，
- *          否则回退为逐电机发送。
- */
-void Class_Gimbal::SendPitchYawCan(int16_t pitch_cmd, int16_t yaw_cmd)
-{
-    uint32_t pitch_send_id;
-    uint32_t yaw_send_id;
-
-    pitch_send_id = Motor_Pitch.GetCanSendId();
-    yaw_send_id = Motor_Yaw.GetCanSendId();
-
-    if ((Motor_Pitch.can == Motor_Yaw.can) &&
-        (pitch_send_id != 0u) &&
-        (pitch_send_id == yaw_send_id))
-    {
-        Motor_Pitch.UpdateCanCache(pitch_cmd);
-        Motor_Yaw.UpdateCanCache(yaw_cmd);
-        Class_Motor::SendCanFrameById(Motor_Pitch.can, pitch_send_id);
-        return;
-    }
-
-    Motor_Pitch.SendCanData(pitch_cmd);
-    Motor_Yaw.SendCanData(yaw_cmd);
-}
 
 /**
  * @brief 初始化云台模块。
@@ -198,7 +148,6 @@ void Class_Gimbal::Init(void *params)
     Tx_Data = {};
 
     Manifold_Manage_Object.Init(&Tx_Data, 0xFE, 0xFF, Manifold_Sentry_Mode_ENABLE);
-    Gimbal_Controller_Object.Init();
     Gimbal_Fault_Object.Init();
 
     CAN2_Manage_Object.Init(&hcan2);
@@ -251,6 +200,7 @@ void Class_Gimbal::Init(void *params)
 
     Motor_Yaw.PID[0].FrictionCompensationEnable(true, 1200.0f, 0.0f, 0.3f, false);
     Motor_Pitch.PID[0].FrictionCompensationEnable(true, 1600.0f, 0.0f, 0.3f, false);
+    Gimbal_Controller_Object.Init();
 
     Motor_Protect_Pitch_Object.Init(GIMBAL_PITCH_MIN_ANGLE,
                                     GIMBAL_PITCH_MAX_ANGLE,
@@ -276,7 +226,6 @@ void Class_Gimbal::MotorControlTask(void *params)
 {
     TickType_t time;
     TickType_t now_tick;
-    uint8_t can_online;
     uint8_t yaw_feedback_ready;
     int16_t pitch_can_cmd;
     int16_t yaw_can_cmd;
@@ -292,13 +241,11 @@ void Class_Gimbal::MotorControlTask(void *params)
         Motor_Yaw.CanDataReceive();
         now_tick = xTaskGetTickCount();
         Gimbal_Debug_HandleCmd(this);
-        Gimbal_Debug_UpdateVisionView(now_tick);
 
         yaw_feedback_ready = (Motor_Yaw.RxData.Encoder_Initialized != 0u);
         
         if (yaw_feedback_ready == 0u)
         {
-            can_online = CAN2_Manage_Object.AliveIsOnline();
             Gimbal_Debug_UpdateCommView(this);
             Gimbal_Controller_Object.Pitch_Target_Deg = 0.0f;
             Gimbal_Controller_Object.Pitch_Target_Speed = 0.0f;
@@ -318,22 +265,30 @@ void Class_Gimbal::MotorControlTask(void *params)
 
             Gimbal_Debug_UpdateMotorView(this);
 
-            pitch_can_cmd = (can_online != 0u) ? OutputToCanNormal(0.0f) : OutputToCanZero(0.0f);
-            yaw_can_cmd = (can_online != 0u) ? OutputToCanNormal(0.0f) : OutputToCanZero(0.0f);
+            pitch_can_cmd = 0;
+            yaw_can_cmd = 0;
+
             Gimbal_Controller_Object.Pitch_Can_Cmd = pitch_can_cmd;
             Gimbal_Controller_Object.Yaw_Can_Cmd = yaw_can_cmd;
-            SendPitchYawCan(pitch_can_cmd, yaw_can_cmd);
+            Class_Motor::SendPair(&Motor_Pitch, pitch_can_cmd,
+                                  &Motor_Yaw, yaw_can_cmd);
             vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
             continue;
         }
 
-        Gimbal_Controller_Object.Update(this, now_tick);
+        Gimbal_Sentry_Target_Object.Update((uint32_t)now_tick);
+        Gimbal_Controller_Object.Update(this, (uint32_t)now_tick);
+        Gimbal_Fault_Object.SyncBit(GIMBAL_FAULT_PITCH_PROTECT,
+                                    Motor_Protect_Pitch_Object.IsFault(),
+                                    0u,
+                                    (uint32_t)now_tick);
         Gimbal_Debug_UpdateVisionView(now_tick);
         Gimbal_Debug_UpdateCommView(this);
         Gimbal_Debug_UpdateMotorView(this);
         pitch_can_cmd = Gimbal_Controller_Object.Pitch_Can_Cmd;
         yaw_can_cmd = Gimbal_Controller_Object.Yaw_Can_Cmd;
-        SendPitchYawCan(pitch_can_cmd, yaw_can_cmd);
+        Class_Motor::SendPair(&Motor_Pitch, pitch_can_cmd,
+                              &Motor_Yaw, yaw_can_cmd);
         vTaskDelayUntil(&time, GIMBAL_CTRL_PERIOD_TICK);
     }
 }

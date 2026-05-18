@@ -47,6 +47,7 @@ typedef struct
     uint8_t vision_target_available; /**< 当前是否存在视觉目标 */
     float vision_pitch_deg;          /**< 当前视觉 pitch */
     float vision_yaw_deg;            /**< 当前视觉 yaw */
+    uint8_t lost_return_finished;    /**< 当前丢目标回扫是否已回到扫描轨迹 */
 } Gimbal_Sentry_Input_TypeDef;
 
 /**
@@ -54,8 +55,6 @@ typedef struct
  */
 typedef struct
 {
-    float pitch_target_deg;              /**< 输出 pitch 目标角 */
-    float yaw_target_deg;                /**< 输出 yaw 目标角 */
     Gimbal_Sentry_State_TypeDef state;   /**< 当前状态机状态 */
 } Gimbal_Sentry_Output_TypeDef;
 
@@ -64,21 +63,13 @@ typedef struct
  * @class Class_Gimbal_Sentry
  * @brief 哨兵状态机管理对象。
  * @details
- * 负责维护扫描相位、跟踪与丢目标回扫状态切换，
- * 并在每个控制周期内生成当前目标角输出。
+ * 只负责维护扫描、跟踪与丢目标回扫之间的状态切换，
+ * 不直接生成目标角输出。
  */
 class Class_Gimbal_Sentry
 {
 public:
     Gimbal_Sentry_State_TypeDef state;   /**< 当前状态机状态 */
-    float scan_yaw_phase_rad;            /**< yaw 扫描正弦相位，单位：rad */
-    float scan_pitch_phase_rad;          /**< pitch 扫描正弦相位，单位：rad */
-    float scan_yaw_target_deg;           /**< 当前扫描轨迹上的 yaw 目标角，单位：deg */
-    float scan_pitch_target_deg;         /**< 当前扫描轨迹上的 pitch 目标角，单位：deg */
-    float lost_return_yaw_target_deg;    /**< 丢目标后冻结的 yaw 回扫目标角，单位：deg */
-    float lost_return_pitch_target_deg;  /**< 丢目标后冻结的 pitch 回扫目标角，单位：deg */
-    float yaw_target_deg;                /**< 当前输出缓存中的 yaw 目标角，单位：deg */
-    float pitch_target_deg;              /**< 当前输出缓存中的 pitch 目标角，单位：deg */
 
     void Init();
     void Reset();
